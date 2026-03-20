@@ -4,7 +4,8 @@ import { useState } from "react";
 
 const pageStyle = {
   minHeight: "100vh",
-  background: "linear-gradient(to bottom, #020617, #0f172a)",
+  background: "#f8fafc",
+  color: "#0f172a",
   padding: "24px 16px"
 };
 
@@ -14,11 +15,11 @@ const wrapperStyle = {
 };
 
 const cardStyle = {
-  background: "rgba(15,23,42,0.88)",
-  border: "1px solid #334155",
+  background: "#ffffff",
+  border: "1px solid #e2e8f0",
   borderRadius: 24,
   padding: 24,
-  boxShadow: "0 10px 30px rgba(0,0,0,0.25)"
+  boxShadow: "0 10px 24px rgba(15,23,42,0.08)"
 };
 
 const inputStyle = {
@@ -26,9 +27,9 @@ const inputStyle = {
   minWidth: 0,
   maxWidth: "100%",
   borderRadius: 16,
-  border: "1px solid #475569",
-  background: "#020617",
-  color: "#f8fafc",
+  border: "1px solid #cbd5e1",
+  background: "#ffffff",
+  color: "#0f172a",
   padding: "14px 16px",
   fontSize: 17,
   outline: "none",
@@ -48,7 +49,7 @@ const buttonStyle = {
 
 const labelStyle = {
   marginBottom: 8,
-  color: "#cbd5e1",
+  color: "#475569",
   fontSize: 14,
   display: "block"
 };
@@ -61,7 +62,7 @@ export default function HomePage() {
       <div style={wrapperStyle}>
         <div style={{ marginBottom: 24 }}>
           <h1 style={{ fontSize: 42, lineHeight: 1.15, margin: 0 }}>루나 차트 해설 MVP</h1>
-          <p style={{ color: "#cbd5e1", fontSize: 18, marginTop: 12, lineHeight: 1.7 }}>
+          <p style={{ color: "#475569", fontSize: 18, marginTop: 12, lineHeight: 1.7 }}>
             티커와 보유 여부를 기준으로 루나가 차트와 함께 개인화된 분석을 보여줘.
           </p>
         </div>
@@ -133,7 +134,7 @@ export default function HomePage() {
               </button>
             </div>
 
-            <div style={{ color: "#94a3b8", fontSize: 13 }}>
+            <div style={{ color: "#64748b", fontSize: 13 }}>
               예시: AAPL.US / TSLA.US / NVDA.US
             </div>
           </div>

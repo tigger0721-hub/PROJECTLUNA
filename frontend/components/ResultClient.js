@@ -6,7 +6,8 @@ import CandleChart from "@/components/CandleChart";
 
 const pageStyle = {
   minHeight: "100vh",
-  background: "linear-gradient(to bottom, #020617, #0f172a)",
+  background: "#f8fafc",
+  color: "#0f172a",
   padding: "16px 12px 96px"
 };
 
@@ -16,11 +17,11 @@ const wrapperStyle = {
 };
 
 const cardStyle = {
-  background: "rgba(15,23,42,0.88)",
-  border: "1px solid #334155",
+  background: "#ffffff",
+  border: "1px solid #e2e8f0",
   borderRadius: 24,
   padding: 18,
-  boxShadow: "0 10px 30px rgba(0,0,0,0.25)"
+  boxShadow: "0 10px 24px rgba(15,23,42,0.08)"
 };
 
 const chipStyle = {
@@ -28,8 +29,8 @@ const chipStyle = {
   alignItems: "center",
   gap: 6,
   borderRadius: 999,
-  background: "#1e293b",
-  color: "#e2e8f0",
+  background: "#eff6ff",
+  color: "#1e293b",
   fontSize: 13,
   padding: "8px 12px"
 };
@@ -97,7 +98,7 @@ function LoadingView() {
           <p
             style={{
               marginTop: 14,
-              color: "#cbd5e1",
+              color: "#475569",
               fontSize: 17,
               lineHeight: 1.7,
               minHeight: 58
@@ -120,7 +121,7 @@ function LoadingView() {
             <div className="loading-bar" />
           </div>
 
-          <div style={{ marginTop: 16, color: "#94a3b8", fontSize: 14 }}>
+          <div style={{ marginTop: 16, color: "#64748b", fontSize: 14 }}>
             오빠, 잠깐만 기다려줘. 루나가 보기 편하게 정리하고 있어.
           </div>
         </div>
@@ -168,11 +169,11 @@ function BottomSheet({ open, onClose, children }) {
           right: 0,
           bottom: 0,
           zIndex: 50,
-          background: "#0f172a",
+          background: "#ffffff",
           borderTopLeftRadius: 24,
           borderTopRightRadius: 24,
-          border: "1px solid #334155",
-          boxShadow: "0 -10px 30px rgba(0,0,0,0.35)",
+          border: "1px solid #e2e8f0",
+          boxShadow: "0 -10px 30px rgba(15,23,42,0.12)",
           padding: "16px 16px 28px",
           maxHeight: "78vh",
           overflowY: "auto"
@@ -183,7 +184,7 @@ function BottomSheet({ open, onClose, children }) {
             width: 56,
             height: 6,
             borderRadius: 999,
-            background: "#475569",
+            background: "#cbd5e1",
             margin: "0 auto 16px"
           }}
         />
@@ -321,9 +322,9 @@ export default function ResultClient() {
             onClick={() => router.push("/")}
             style={{
               borderRadius: 14,
-              border: "1px solid #475569",
-              background: "#0f172a",
-              color: "#fff",
+              border: "1px solid #cbd5e1",
+              background: "#ffffff",
+              color: "#0f172a",
               padding: "10px 14px",
               fontWeight: 700
             }}
@@ -361,7 +362,7 @@ export default function ResultClient() {
             }}
           >
             <div style={{ ...cardStyle, padding: 14, borderRadius: 18 }}>
-              <div style={{ color: "#94a3b8", fontSize: 13, marginBottom: 8 }}>기술 요약</div>
+              <div style={{ color: "#64748b", fontSize: 13, marginBottom: 8 }}>기술 요약</div>
               <SummaryRow label="현재가" value={summary.currentPrice} />
               <SummaryRow label="5일선" value={summary.ma5} />
               <SummaryRow label="20일선" value={summary.ma20} />
@@ -402,9 +403,9 @@ export default function ResultClient() {
           <button
             onClick={() => setSheetOpen(false)}
             style={{
-              border: "1px solid #475569",
-              background: "#0f172a",
-              color: "#fff",
+              border: "1px solid #cbd5e1",
+              background: "#ffffff",
+              color: "#0f172a",
               borderRadius: 12,
               padding: "8px 12px",
               fontWeight: 700
@@ -418,7 +419,7 @@ export default function ResultClient() {
           style={{
             whiteSpace: "pre-wrap",
             lineHeight: 1.9,
-            color: "#e2e8f0",
+            color: "#0f172a",
             fontSize: 16
           }}
         >
