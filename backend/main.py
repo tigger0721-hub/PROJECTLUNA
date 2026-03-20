@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import os
 from io import StringIO
 from typing import Any, Dict, List, Optional
@@ -22,6 +24,7 @@ app.add_middleware(
 )
 
 STOOQ_URL = "https://stooq.com/q/d/l/"
+logger = logging.getLogger(__name__)
 
 STYLE_GUIDE = {
     "conservative": {
@@ -59,11 +62,24 @@ async def fetch_daily_prices(ticker: str) -> List[Dict[str, Any]]:
     symbol = normalize_ticker(ticker)
     params = {"s": symbol, "i": "d"}
 
-    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-        response = await client.get(STOOQ_URL, params=params)
-        response.raise_for_status()
+    text = ""
+    last_error: Optional[Exception] = None
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+                response = await client.get(STOOQ_URL, params=params)
+                response.raise_for_status()
+            text = response.text.strip()
+            if text:
+                break
+        except Exception as e:
+            last_error = e
+            if attempt == 0:
+                await asyncio.sleep(0.25)
 
-    text = response.text.strip()
+    if not text and last_error:
+        raise ValueError(f"시세 요청이 불안정해. 잠깐 뒤에 다시 시도해줘: {last_error}")
+
     if not text or "No data" in text:
         raise ValueError(f"데이터를 찾지 못했어: {ticker}")
 
@@ -362,6 +378,14 @@ def build_rendered_ai_text(payload: Dict[str, Any]) -> str:
     return "\n\n".join(paragraphs)
 
 
+def _fallback_ai_opinion(summary: Dict[str, Any], state_hint: str) -> str:
+    return (
+        f"오빠 지금 자리는 {state_hint} 쪽으로 보는 게 맞아.\n\n"
+        f"현재가는 {summary['currentPrice']}이고, 핵심 지지는 {summary['support']} / 저항은 {summary['resistance']} 근처야.\n\n"
+        f"거래량은 평균 대비 {summary['volumeRatio']}배라서 무리한 추격보다 기준 지키는 쪽이 더 나아 보여."
+    )
+
+
 def generate_ai_opinion(
     ticker: str,
     analysis: Dict[str, Any],
@@ -507,22 +531,31 @@ luna_comment
 반드시 JSON 하나만 반환하고, 마크다운 코드블록은 쓰지 마라.
 """.strip()
 
-    client = OpenAI(api_key=api_key)
-    response = client.chat.completions.create(
-        model="gpt-5-mini",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    )
+    try:
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            timeout=25,
+        )
 
-    content = (response.choices[0].message.content or "").strip()
-    parsed = _safe_json_parse(content)
+        content = (response.choices[0].message.content or "").strip()
+        parsed = _safe_json_parse(content)
 
-    if parsed:
-        return build_rendered_ai_text(parsed)
+        if parsed:
+            rendered = build_rendered_ai_text(parsed)
+            if rendered:
+                return rendered
 
-    return content if content else "오빠, 지금은 루나 의견이 비어 있어서 한 번만 다시 눌러보는 게 좋겠어."
+        if content:
+            return content
+    except Exception as e:
+        logger.exception("AI opinion generation failed: %s", e)
+
+    return _fallback_ai_opinion(summary, state_hint)
 
 
 @app.get("/health")
@@ -561,6 +594,13 @@ async def analyze(
             style=style,
         )
         ai_opinion = generate_ai_opinion(ticker, analysis, personalization)
+        if not ai_opinion or not str(ai_opinion).strip():
+            ai_opinion = _fallback_ai_opinion(analysis["summary"], build_state_hint(
+                summary=analysis["summary"],
+                has_position=personalization["hasPosition"],
+                avg_price=personalization["avgPrice"],
+                style=personalization["style"],
+            ))
 
         analysis["explanation"] = analysis["trendSummary"]
         analysis["lessons"] = []
