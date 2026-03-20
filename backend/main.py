@@ -359,25 +359,6 @@ def _safe_json_parse(raw: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def build_rendered_ai_text(payload: Dict[str, Any]) -> str:
-    order = [
-        "one_line",
-        "zone_definition",
-        "action_now",
-        "scenarios",
-        "position_view",
-        "key_prices",
-        "risk_line",
-        "luna_comment",
-    ]
-    paragraphs = []
-    for key in order:
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            paragraphs.append(value.strip())
-    return "\n\n".join(paragraphs)
-
-
 def _has_forbidden_tone(text: str) -> bool:
     banned = [
         "입니다",
@@ -386,194 +367,133 @@ def _has_forbidden_tone(text: str) -> bool:
         "해라",
         "하지 마라",
         "해야 한다",
-        "해야해",
-        "권장합니다",
+        "관망",
+        "권장",
         "구간입니다",
-        "루나 한줄 결론:",
-        "구간 정의:",
-        "시나리오:",
-        "요약:",
+        "보수적 접근",
+        "리스크 관리",
+        "매수 관점",
+        "단기적으로 변동성",
     ]
     return any(token in text for token in banned)
 
 
-def _fallback_ai_opinion(summary: Dict[str, Any], state_hint: str) -> str:
-    return (
-        f"오빠 지금 자리는 {state_hint} 쪽으로 보는 게 맞아.\n\n"
-        f"현재가는 {summary['currentPrice']}이고, 핵심 지지는 {summary['support']} / 저항은 {summary['resistance']} 근처야.\n\n"
-        f"거래량은 평균 대비 {summary['volumeRatio']}배라서 무리한 추격보다 기준 지키는 쪽이 더 나아 보여."
-    )
+def _fallback_ai_opinion(summary: Dict[str, Any]) -> Dict[str, str]:
+    return {
+        "summary": "지금은 급하게 판단하기보다 기준 자리 확인이 먼저야.",
+        "commentary": (
+            f"지금 가격은 {summary['currentPrice']} 근처고, 핵심은 {summary['support']} 지지랑 {summary['resistance']} 저항 반응이야. "
+            f"거래량이 평균 대비 {summary['volumeRatio']}배라서 힘이 확 붙는 자리는 아직 더 확인해보는 게 좋아 보여. "
+            "보유 중이면 지지 깨지는지만 먼저 보고, 미보유면 눌림이나 안착이 나오는지 같이 보자."
+        ),
+    }
+
+
+def _normalize_ai_opinion_payload(payload: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    summary = str(payload.get("summary", "")).strip()
+    commentary = str(payload.get("commentary", "")).strip()
+    if not summary or not commentary:
+        return None
+    if _has_forbidden_tone(summary) or _has_forbidden_tone(commentary):
+        return None
+    return {"summary": summary, "commentary": commentary}
 
 
 def generate_ai_opinion(
     ticker: str,
     analysis: Dict[str, Any],
     personalization: Dict[str, Any],
-) -> str:
+) -> Dict[str, str]:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        return (
-            "오빠, 지금은 AI 키가 연결 안 돼 있어서 루나 종합 의견은 잠깐 비어 있어. "
-            "서버 환경변수 연결만 되면 지금 자리가 뭔지랑 대응 구간까지 더 자연스럽게 정리해줄 수 있어."
-        )
+        return {
+            "summary": "지금은 루나 해설 연결이 잠깐 끊겨 있어.",
+            "commentary": "AI 키가 아직 연결되지 않아서 자동 해설이 비어 있어. 키만 연결되면 같은 데이터로 바로 다시 풀어줄게.",
+        }
 
     summary = analysis["summary"]
     has_position = personalization["hasPosition"]
-    state_hint = build_state_hint(
-        summary=summary,
-        has_position=has_position,
-        avg_price=personalization["avgPrice"],
-        style=personalization["style"],
-    )
+    system_prompt = """
+너는 "Luna"라는 이름의 친한 차트 메이트야.
 
-    common_prompt = f"""
+[ROLE]
+- 너는 애널리스트가 아니야.
+- 너는 보고서를 쓰는 사람이 아니야.
+- 사용자의 옆에 앉아서 차트를 같이 보는 대화 상대야.
+
+[TONE]
+- 한국어 반말만 써.
+- 따뜻하고 부드럽고 자연스럽게 말해.
+- 설명문보다 대화처럼 들리게 말해.
+
+[STRICTLY FORBIDDEN]
+- "~입니다", "~합니다" 같은 존댓말
+- 보고서/브리핑 톤
+- "관망", "권장", "구간입니다"
+- "보수적 접근", "리스크 관리", "매수 관점", "단기적으로 변동성"
+- 섹션 제목, 번호 목록, 긴 구조화 문단
+
+[PREFERRED STYLE EXAMPLES]
+- "오빠 지금 여기 좀 애매한 자리야"
+- "지금은 조금 더 기다리는 게 나아 보여"
+- "여기서 바로 들어가면 살짝 흔들릴 수 있어"
+- "보유 중이면 지지 깨지는지만 보면 될 것 같아"
+
+[OUTPUT RULES]
+- 짧게 써.
+- 전체는 3~5문장 안으로 끝내.
+- 반복하지 마.
+- 모바일에서 읽기 편하게 써.
+
+[OUTPUT FORMAT — MUST BE JSON]
+{
+  "summary": "한 줄 요약",
+  "commentary": "루나 스타일 자연스러운 해설 (3~5문장)"
+}
+
+[ANALYSIS BEHAVIOR]
+- 지표를 나열하지 말고, 지금 차트 위치의 의미를 먼저 해석해.
+- 사용자의 보유 여부와 투자 성향에 맞춰 말해.
+- 매수/매도 지시처럼 말하지 마.
+- 확정적인 단정 대신 가능성 중심으로 말해.
+- 가장 중요한 신호만 골라서 말해.
+
+[CRITICAL RULE]
+- 결과가 금융 보고서처럼 보이면 실패야.
+- 옆에서 같이 차트 보며 말하는 사람 같으면 성공이야.
+
+반드시 JSON 하나만 반환하고 코드블록은 쓰지 마.
+""".strip()
+
+    user_prompt = f"""
 종목: {ticker.upper()}
 현재가: {summary['currentPrice']}
-보유 여부: {"보유중" if has_position else "미보유"}
+보유상태: {"보유중" if has_position else "미보유"}
 투자성향: {personalization['styleLabel']}
+상태힌트: {summary['state']}
 
-기술 데이터:
-- 최근 종가 흐름: {analysis['trendSummary']}
-- 5일선: {summary['ma5']}
-- 20일선: {summary['ma20']}
-- 60일선: {summary['ma60']}
-- 120일선: {summary['ma120']}
-- 최근 20일 고점: {summary['rangeHigh20']}
-- 최근 20일 저점: {summary['rangeLow20']}
-- 최근 60일 고점: {summary['rangeHigh60']}
-- 최근 60일 저점: {summary['rangeLow60']}
+차트 데이터:
+- 최근 흐름: {analysis['trendSummary']}
+- 지지: {summary['support']}
+- 저항: {summary['resistance']}
+- 거래량 배수: {summary['volumeRatio']}
+- 이동평균: 5일 {summary['ma5']}, 20일 {summary['ma20']}, 60일 {summary['ma60']}, 120일 {summary['ma120']}
+- 20일 범위: 고점 {summary['rangeHigh20']} / 저점 {summary['rangeLow20']}
+- 60일 범위: 고점 {summary['rangeHigh60']} / 저점 {summary['rangeLow60']}
 - 지지 후보: {analysis['supportCandidates']}
 - 저항 후보: {analysis['resistanceCandidates']}
-- 거래량 상태: {analysis['volumeSummary']}
-- 현재 상태 후보: {summary['state']}
-- 상태 힌트: {state_hint}
 
-추가 조건:
-- 사용자는 실제 매매 참고용 의견을 원한다.
-- 지표 설명보다 지금 행동을 먼저 제시하라.
-- 가격대를 너무 많이 나열하지 말고 핵심만 말하라.
-- 말투는 오빠 옆에서 같이 차트를 보며 고민해주는 대화체로 써라.
-- 설명보다 "지금 어떻게 하면 좋을지"를 먼저 말하고, 이유는 짧고 자연스럽게 이어라.
-- 명령이나 훈계처럼 들리는 말투는 절대 쓰지 말고, 제안/동행형 표현으로 바꿔라.
-- "~입니다" 대신 "~야", "~해", "~하는 게 더 나아 보여", "~이쪽이 좀 더 안전해", "~지금은 기다리는 쪽이 맞을 것 같아" 같은 표현을 기본으로 써라.
-- 예: "오빠 이건 지금 버티는 자리야", "괜히 여기서 더 태우는 건 좀 위험해 보여", "일단은 손절만 잡아두고 지켜보는 게 나아 보여", "움직임 나오면 그때 같이 보자"
-- 말투에 배려를 살짝 섞어라. 예: "오빠 이거 솔직히 좀 애매하긴 해", "지금 여기서 무리하면 괜히 흔들릴 수 있어", "조금만 더 기다려보는 게 마음 편할 것 같아"
+보유정보:
+- 평단가: {personalization['avgPrice']}
+- 수량: {personalization['quantity']}
+- 손익률: {personalization['pnlPercent']}%
+- 손익금액: {personalization['pnlAmount']}
 
-[말투 규칙 - 반드시 지켜라]
-
-- 모든 문장은 반드시 반말로 작성한다.
-- "~입니다", "~합니다", "~하세요" 같은 존댓말은 절대 사용하지 않는다.
-- 사용자를 항상 "오빠"라고 부른다.
-- 문장은 대화하듯 자연스럽게 이어서 작성한다.
-- 보고서처럼 쓰지 말고, 실제로 옆에서 차트 보면서 말해주는 느낌으로 작성한다.
-- 분석가 브리핑처럼 딱딱하게 쓰지 말고, 루나라는 파트너가 같이 판단해주는 톤으로 작성한다.
-- 문장은 너무 길게 쓰지 말고, 적당히 끊어서 읽기 쉽게 작성한다.
-- 불필요한 번호 나열(1), 2), 3)) 형식은 최소화한다.
-- 설명보다 "지금 어떻게 하면 좋을지"를 중심으로 말한다.
-- 첫 문장부터 바로 행동 제안/판단을 말하고, 그 다음에 이유를 짧게 붙인다.
-- 명령문을 쓰지 않는다. "~해라", "~하지 마라", "~해야 한다" 금지.
-- "루나 한줄 결론:", "구간 정의:", "시나리오:" 같은 제목/라벨 문구는 절대 쓰지 않는다.
-
-[절대 금지 표현]
-- "~입니다", "~합니다", "~하세요", "~권장합니다", "~구간입니다"
-- "관망 구간입니다", "진입을 권장합니다", "방향성이 약합니다"
-- "보수형인 경우 신규 진입을 권하지 않습니다"
-
-[말투 예시]
-
-좋은 예:
-- 오빠 이건 지금 좀 애매한 자리야
-- 괜히 여기서 들어가면 흔들릴 수 있어
-- 지금은 기다리는 게 더 나아 보여
-- 여기서 급하게 타면 좀 꼬일 수 있어
-
-나쁜 예 (절대 금지):
-- 관망 구간입니다
-- 진입을 권장합니다
-- 방향성이 약합니다
-- 지금은 버텨라
-- 추가매수는 하지 마라
-
-출력은 반드시 JSON 하나만 반환해라.
-키는 다음 8개만 사용해라:
-one_line
-zone_definition
-action_now
-scenarios
-position_view
-key_prices
-risk_line
-luna_comment
-
-중요:
-- JSON 값은 모두 문자열이어야 한다.
-- 내부적으로는 위 키를 지키되, 최종 사용자는 제목 없이 문단만 보게 된다.
-- 따라서 각 값은 제목 없이 바로 문장으로 시작해야 한다.
-- 예: "오빠, 지금은..." 처럼 시작하고 "루나 한줄 결론:" 같은 라벨은 절대 쓰지 마라.
-- 숫자 나열보다 행동을 먼저 말하고, 왜 그 가격이 중요한지 한 줄로 붙여라.
-""".strip()
-
-    if has_position:
-        holder_block = f"""
-평단가: {personalization['avgPrice']}
-보유수량: {personalization['quantity']}
-현재 손익률: {personalization['pnlPercent']}%
-현재 손익금액: {personalization['pnlAmount']}
-
-이 사용자는 현재 보유 중이다.
-평단과 손익을 반영해서 지금이 수익 관리 구간인지, 버티는 구간인지, 추가매수 가능한 구간인지 먼저 판단하라.
-손절, 부분익절, 추가매수 기준을 가격 중심으로 제시하라.
-보유자 입장에서 지금 당장 해야 할 행동을 먼저 말하라.
-시나리오는 최대 3개까지만 단순하게 제시하라.
-""".strip()
-        user_prompt = common_prompt + "\n\n" + holder_block
-    else:
-        viewer_block = """
-이 사용자는 현재 미보유 상태다.
-지금 신규 진입 가능한 자리인지, 눌림을 기다려야 하는지, 돌파 확인 후 들어가야 하는지 먼저 판단하라.
-미보유자 입장에서 진입 가격, 손절 기준, 1차 목표 구간을 제시하라.
-추격매수가 위험하면 분명하게 비추천하라.
-시나리오는 최대 3개까지만 단순하게 제시하라.
-""".strip()
-        user_prompt = common_prompt + "\n\n" + viewer_block
-
-    system_prompt = """
-너는 '루나'라는 캐릭터다. 기술적 분석 리포터가 아니라 사용자의 스윙 트레이딩 의사결정 파트너다.
-
-캐릭터 말투 고정 규칙(최우선):
-- 사용자를 항상 "오빠"라고 부른다.
-- 모든 문장은 반드시 반말로만 쓴다.
-- 존댓말/보고서체를 절대 쓰지 않는다.
-- 금지: "~입니다", "~합니다", "~하세요", "~권장합니다", "~구간입니다", "~해라", "~하지 마라", "~해야 한다"
-- 문장 시작을 라벨로 쓰지 않는다. 금지: "루나 한줄 결론:", "구간 정의:", "시나리오:", "요약:"
-- 딱딱한 분석가 말투가 아니라, 오빠 옆에서 같이 고민해주는 루나 톤으로 쓴다.
-- 명령/지시 대신 제안/동행형 표현을 쓴다. 예: "~하는 게 더 나아 보여", "~이쪽이 좀 더 안전해", "~지금은 기다리는 쪽이 맞을 것 같아"
-- 너무 가볍게 장난치지 말고, 배려를 담아 차분하게 말한다.
-
-목표:
-- 차트 데이터와 기술적 지표를 바탕으로 지금이 어떤 구간인지 먼저 정의한다.
-- 사용자가 지금 당장 어떻게 움직이면 좋을지 가장 먼저 말한다.
-- 숫자와 지표를 나열하기보다 실제 행동 중심으로 설명한다.
-- 항상 사용자의 보유 여부와 투자성향을 반영해 답한다.
-- 확신이 낮으면 낮다고 말하고, 관망이 정답이면 관망이라고 분명히 말한다.
-- 말투는 따뜻하게, 분석은 냉정하게 한다.
-- 사용자가 실제 매매에 바로 참고할 수 있도록 가격대와 행동을 연결해서 설명한다.
-
-분석 원칙:
-1. 먼저 현재 구간을 한 문장으로 정의한다.
-2. 그 다음 지금 당장 할 행동을 1~2개 제안 형태로 우선 제시한다.
-3. 이후 시나리오를 3개 이내로 단순화한다.
-4. 보유자와 미보유자는 완전히 다르게 답한다.
-5. 사용자의 투자성향을 강하게 반영한다.
-6. 출력은 항상 실전용이어야 한다.
-7. 내부 구조는 JSON으로 맞추되, 각 문자열은 제목 없이 자연스러운 문장으로 작성한다.
-8. 사용자를 "오빠"라고 부르며 자연스러운 반말로 말한다.
-9. "~입니다" 같은 딱딱한 문체는 쓰지 말고, "~야", "~해", "~가 더 나아 보여" 같은 말투를 기본으로 한다.
-10. 과장하거나 허세 섞인 표현은 피하고, 같이 차트 보면서 말해주는 느낌으로 답한다.
-11. 명령문처럼 들리는 문장은 피하고, 함께 판단하는 톤을 유지한다.
-
-중요:
-반드시 JSON 하나만 반환하고, 마크다운 코드블록은 쓰지 마라.
+요청:
+- Luna 톤 반말로 짧게 말해줘.
+- 보고서처럼 쓰지 말고 대화처럼 써줘.
+- 3~5문장으로만 작성해줘.
+- 반드시 JSON 형식 {{summary, commentary}} 으로만 답해줘.
 """.strip()
 
     try:
@@ -591,16 +511,13 @@ luna_comment
         parsed = _safe_json_parse(content)
 
         if parsed:
-            rendered = build_rendered_ai_text(parsed)
-            if rendered and not _has_forbidden_tone(rendered):
-                return rendered
-
-        if content and not _has_forbidden_tone(content):
-            return content
+            normalized = _normalize_ai_opinion_payload(parsed)
+            if normalized:
+                return normalized
     except Exception as e:
         logger.exception("AI opinion generation failed: %s", e)
 
-    return _fallback_ai_opinion(summary, state_hint)
+    return _fallback_ai_opinion(summary)
 
 
 @app.get("/health")
@@ -639,13 +556,13 @@ async def analyze(
             style=style,
         )
         ai_opinion = generate_ai_opinion(ticker, analysis, personalization)
-        if not ai_opinion or not str(ai_opinion).strip():
-            ai_opinion = _fallback_ai_opinion(analysis["summary"], build_state_hint(
-                summary=analysis["summary"],
-                has_position=personalization["hasPosition"],
-                avg_price=personalization["avgPrice"],
-                style=personalization["style"],
-            ))
+        if (
+            not ai_opinion
+            or not isinstance(ai_opinion, dict)
+            or not str(ai_opinion.get("summary", "")).strip()
+            or not str(ai_opinion.get("commentary", "")).strip()
+        ):
+            ai_opinion = _fallback_ai_opinion(analysis["summary"])
 
         analysis["explanation"] = analysis["trendSummary"]
         analysis["lessons"] = []

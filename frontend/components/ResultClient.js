@@ -328,7 +328,9 @@ export default function ResultClient() {
   const support = numberOrDash(summary?.support);
   const resistance = numberOrDash(summary?.resistance);
   const volumeRatio = summary?.volumeRatio ? `${numberOrDash(summary?.volumeRatio)}배` : "-";
-  const aiOpinion = result?.aiOpinion || "오빠, 지금은 해설을 잠깐 못 불러왔어. 다시 눌러보자.";
+  const aiOpinion = result?.aiOpinion || {};
+  const aiSummary = aiOpinion?.summary || "지금은 루나 한 줄 요약을 잠깐 못 불러왔어.";
+  const aiCommentary = aiOpinion?.commentary || "오빠, 지금은 해설을 잠깐 못 불러왔어. 다시 눌러보자.";
 
   return (
     <main style={pageStyle}>
@@ -444,7 +446,8 @@ export default function ResultClient() {
             fontSize: 16
           }}
         >
-          {aiOpinion}
+          <div style={{ fontWeight: 700, marginBottom: 10 }}>{aiSummary}</div>
+          <div>{aiCommentary}</div>
         </div>
       </BottomSheet>
     </main>
