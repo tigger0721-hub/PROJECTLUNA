@@ -184,7 +184,7 @@ function BottomSheet({ open, onClose, children }) {
             width: 56,
             height: 6,
             borderRadius: 999,
-            background: "#cbd5e1",
+            background: "#334155",
             margin: "0 auto 16px"
           }}
         />
@@ -322,7 +322,7 @@ export default function ResultClient() {
             onClick={() => router.push("/")}
             style={{
               borderRadius: 14,
-              border: "1px solid #cbd5e1",
+              border: "1px solid #334155",
               background: "#ffffff",
               color: "#0f172a",
               padding: "10px 14px",
@@ -403,7 +403,7 @@ export default function ResultClient() {
           <button
             onClick={() => setSheetOpen(false)}
             style={{
-              border: "1px solid #cbd5e1",
+              border: "1px solid #334155",
               background: "#ffffff",
               color: "#0f172a",
               borderRadius: 12,
