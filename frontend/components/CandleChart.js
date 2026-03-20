@@ -1,0 +1,140 @@
+"use client";
+
+import { useEffect, useRef } from "react";
+import { createChart } from "lightweight-charts";
+
+export default function CandleChart({ chartData, support, resistance }) {
+  const containerRef = useRef(null);
+  const chartRef = useRef(null);
+
+  useEffect(() => {
+    if (!containerRef.current || !chartData) return;
+
+    const chart = createChart(containerRef.current, {
+      width: containerRef.current.clientWidth,
+      height: 460,
+      layout: {
+        background: { color: "#020617" },
+        textColor: "#cbd5e1"
+      },
+      grid: {
+        vertLines: { color: "rgba(51,65,85,0.35)" },
+        horzLines: { color: "rgba(51,65,85,0.35)" }
+      },
+      rightPriceScale: {
+        borderColor: "#334155",
+        scaleMargins: {
+          top: 0.08,
+          bottom: 0.28
+        }
+      },
+      timeScale: {
+        borderColor: "#334155",
+        timeVisible: true,
+        rightOffset: 6,
+        barSpacing: 9,
+        minBarSpacing: 6
+      },
+      crosshair: {
+        mode: 1
+      }
+    });
+
+    chartRef.current = chart;
+
+    const candleSeries = chart.addCandlestickSeries({
+      upColor: "#22c55e",
+      downColor: "#ef4444",
+      borderVisible: false,
+      wickUpColor: "#22c55e",
+      wickDownColor: "#ef4444",
+      priceLineVisible: true
+    });
+
+    const ma5Series = chart.addLineSeries({
+      color: "#f59e0b",
+      lineWidth: 2,
+      priceLineVisible: false
+    });
+
+    const ma20Series = chart.addLineSeries({
+      color: "#60a5fa",
+      lineWidth: 2,
+      priceLineVisible: false
+    });
+
+    const ma60Series = chart.addLineSeries({
+      color: "#a78bfa",
+      lineWidth: 2,
+      priceLineVisible: false
+    });
+
+    const volumeSeries = chart.addHistogramSeries({
+      priceFormat: { type: "volume" },
+      priceScaleId: "",
+      scaleMargins: {
+        top: 0.78,
+        bottom: 0
+      }
+    });
+
+    candleSeries.setData(chartData.candles || []);
+    ma5Series.setData(chartData.ma5 || []);
+    ma20Series.setData(chartData.ma20 || []);
+    ma60Series.setData(chartData.ma60 || []);
+    volumeSeries.setData(chartData.volume || []);
+
+    if (support) {
+      candleSeries.createPriceLine({
+        price: support,
+        color: "#22c55e",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: "지지"
+      });
+    }
+
+    if (resistance) {
+      candleSeries.createPriceLine({
+        price: resistance,
+        color: "#ef4444",
+        lineWidth: 1,
+        lineStyle: 2,
+        axisLabelVisible: true,
+        title: "저항"
+      });
+    }
+
+    const fit = () => {
+      chart.applyOptions({
+        width: containerRef.current ? containerRef.current.clientWidth : 320
+      });
+      chart.timeScale().fitContent();
+    };
+
+    fit();
+
+    let resizeTimer = null;
+
+    const handleResize = () => {
+      if (resizeTimer) clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        fit();
+      }, 120);
+    };
+
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("orientationchange", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("orientationchange", handleResize);
+      if (resizeTimer) clearTimeout(resizeTimer);
+      chart.remove();
+      chartRef.current = null;
+    };
+  }, [chartData, support, resistance]);
+
+  return <div ref={containerRef} style={{ width: "100%", minHeight: 460 }} />;
+}
