@@ -378,6 +378,21 @@ def build_rendered_ai_text(payload: Dict[str, Any]) -> str:
     return "\n\n".join(paragraphs)
 
 
+def _has_forbidden_tone(text: str) -> bool:
+    banned = [
+        "입니다",
+        "합니다",
+        "하세요",
+        "권장합니다",
+        "구간입니다",
+        "루나 한줄 결론:",
+        "구간 정의:",
+        "시나리오:",
+        "요약:",
+    ]
+    return any(token in text for token in banned)
+
+
 def _fallback_ai_opinion(summary: Dict[str, Any], state_hint: str) -> str:
     return (
         f"오빠 지금 자리는 {state_hint} 쪽으로 보는 게 맞아.\n\n"
@@ -448,6 +463,13 @@ def generate_ai_opinion(
 - 문장은 너무 길게 쓰지 말고, 적당히 끊어서 읽기 쉽게 작성한다.
 - 불필요한 번호 나열(1), 2), 3)) 형식은 최소화한다.
 - 설명보다 "지금 어떻게 해야 하는지"를 중심으로 말한다.
+- 첫 문장부터 바로 행동을 말하고, 그 다음에 이유를 짧게 붙인다.
+- "루나 한줄 결론:", "구간 정의:", "시나리오:" 같은 제목/라벨 문구는 절대 쓰지 않는다.
+
+[절대 금지 표현]
+- "~입니다", "~합니다", "~하세요", "~권장합니다", "~구간입니다"
+- "관망 구간입니다", "진입을 권장합니다", "방향성이 약합니다"
+- "보수형인 경우 신규 진입을 권하지 않습니다"
 
 [말투 예시]
 
@@ -455,6 +477,7 @@ def generate_ai_opinion(
 - 오빠 이건 지금 좀 애매한 자리야
 - 괜히 여기서 들어가면 흔들릴 수 있어
 - 지금은 기다리는 게 더 나아 보여
+- 여기서 급하게 타면 좀 꼬일 수 있어
 
 나쁜 예 (절대 금지):
 - 관망 구간입니다
@@ -477,6 +500,7 @@ luna_comment
 - 내부적으로는 위 키를 지키되, 최종 사용자는 제목 없이 문단만 보게 된다.
 - 따라서 각 값은 제목 없이 바로 문장으로 시작해야 한다.
 - 예: "오빠, 지금은..." 처럼 시작하고 "루나 한줄 결론:" 같은 라벨은 절대 쓰지 마라.
+- 숫자 나열보다 행동을 먼저 말하고, 왜 그 가격이 중요한지 한 줄로 붙여라.
 """.strip()
 
     if has_position:
@@ -504,7 +528,16 @@ luna_comment
         user_prompt = common_prompt + "\n\n" + viewer_block
 
     system_prompt = """
-너는 기술적 분석 리포터가 아니라 사용자의 스윙 트레이딩 의사결정 파트너다.
+너는 '루나'라는 캐릭터다. 기술적 분석 리포터가 아니라 사용자의 스윙 트레이딩 의사결정 파트너다.
+
+캐릭터 말투 고정 규칙(최우선):
+- 사용자를 항상 "오빠"라고 부른다.
+- 모든 문장은 반드시 반말로만 쓴다.
+- 존댓말/보고서체를 절대 쓰지 않는다.
+- 금지: "~입니다", "~합니다", "~하세요", "~권장합니다", "~구간입니다"
+- 문장 시작을 라벨로 쓰지 않는다. 금지: "루나 한줄 결론:", "구간 정의:", "시나리오:", "요약:"
+- 말투는 친근하지만 분석은 냉정하게 유지한다.
+- 너무 가볍게 장난치지 말고, 옆에서 차트 같이 보며 말해주는 톤으로 쓴다.
 
 목표:
 - 차트 데이터와 기술적 지표를 바탕으로 지금이 어떤 구간인지 먼저 정의한다.
@@ -547,10 +580,10 @@ luna_comment
 
         if parsed:
             rendered = build_rendered_ai_text(parsed)
-            if rendered:
+            if rendered and not _has_forbidden_tone(rendered):
                 return rendered
 
-        if content:
+        if content and not _has_forbidden_tone(content):
             return content
     except Exception as e:
         logger.exception("AI opinion generation failed: %s", e)
