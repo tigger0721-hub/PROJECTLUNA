@@ -1,4 +1,5 @@
 "use client";
+
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import CandleChart from "@/components/CandleChart";
@@ -6,7 +7,7 @@ import CandleChart from "@/components/CandleChart";
 const pageStyle = {
   minHeight: "100vh",
   background: "linear-gradient(to bottom, #020617, #0f172a)",
-  padding: "24px 16px"
+  padding: "16px 12px 96px"
 };
 
 const wrapperStyle = {
@@ -18,36 +19,20 @@ const cardStyle = {
   background: "rgba(15,23,42,0.88)",
   border: "1px solid #334155",
   borderRadius: 24,
-  padding: 24,
+  padding: 18,
   boxShadow: "0 10px 30px rgba(0,0,0,0.25)"
 };
 
-const sectionTitle = {
-  fontSize: 22,
-  fontWeight: 800,
-  marginBottom: 16
-};
-
-const statGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-  gap: 12
-};
-
-const statBoxStyle = {
+const chipStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  borderRadius: 999,
   background: "#1e293b",
-  borderRadius: 18,
-  padding: 16
+  color: "#e2e8f0",
+  fontSize: 13,
+  padding: "8px 12px"
 };
-
-function StatBox({ label, value }) {
-  return (
-    <div style={statBoxStyle}>
-      <div style={{ fontSize: 13, color: "#94a3b8" }}>{label}</div>
-      <div style={{ fontSize: 19, fontWeight: 700, marginTop: 6 }}>{value}</div>
-    </div>
-  );
-}
 
 function LoadingView() {
   const messages = useMemo(
@@ -154,54 +139,142 @@ function LoadingView() {
         }
 
         @keyframes loadingBar {
-          0% {
-            transform: translateX(-120%);
-          }
-          100% {
-            transform: translateX(320%);
-          }
+          0% { transform: translateX(-120%); }
+          100% { transform: translateX(320%); }
         }
       `}</style>
     </main>
   );
 }
 
-export default function ResultPage() {
+function BottomSheet({ open, onClose, children }) {
+  if (!open) return null;
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(2,6,23,0.65)",
+          zIndex: 40
+        }}
+      />
+      <div
+        style={{
+          position: "fixed",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 50,
+          background: "#0f172a",
+          borderTopLeftRadius: 24,
+          borderTopRightRadius: 24,
+          border: "1px solid #334155",
+          boxShadow: "0 -10px 30px rgba(0,0,0,0.35)",
+          padding: "16px 16px 28px",
+          maxHeight: "78vh",
+          overflowY: "auto"
+        }}
+      >
+        <div
+          style={{
+            width: 56,
+            height: 6,
+            borderRadius: 999,
+            background: "#475569",
+            margin: "0 auto 16px"
+          }}
+        />
+        {children}
+      </div>
+    </>
+  );
+}
+
+function SummaryRow({ label, value }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        gap: 12,
+        padding: "10px 0",
+        borderBottom: "1px solid rgba(71,85,105,0.4)"
+      }}
+    >
+      <div style={{ color: "#94a3b8", fontSize: 14 }}>{label}</div>
+      <div style={{ color: "#f8fafc", fontWeight: 700, textAlign: "right" }}>{value}</div>
+    </div>
+  );
+}
+
+export default function ResultClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function requestOnce() {
+      const res = await fetch(`/api/proxy-analyze?${searchParams.toString()}`, {
+        cache: "no-store"
+      });
+
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        const text = await res.text();
+        throw new Error(text?.slice(0, 120) || "분석 서버가 잠깐 불안정해.");
+      }
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "분석 요청에 실패했어");
+      }
+
+      return data;
+    }
+
     async function run() {
       setLoading(true);
       setError("");
 
       try {
-        const res = await fetch(`/api/proxy-analyze?${searchParams.toString()}`, {
-          cache: "no-store"
-        });
-
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.detail || "분석 요청에 실패했어");
+        let data;
+        try {
+          data = await requestOnce();
+        } catch (firstErr) {
+          data = await requestOnce();
         }
 
-        setResult(data);
+        if (!cancelled) {
+          setResult(data);
+        }
       } catch (e) {
-        setError(e.message || "오류가 발생했어");
+        if (!cancelled) {
+          setError(e.message || "오류가 발생했어");
+        }
       } finally {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
 
     run();
+
+    return () => {
+      cancelled = true;
+    };
   }, [searchParams]);
 
-  if (loading) {
-    return <LoadingView />;
-  }
+  if (loading) return <LoadingView />;
 
   if (error) {
     return (
@@ -230,11 +303,20 @@ export default function ResultPage() {
 
   const analysis = result.analysis;
   const personalization = result.personalization;
+  const summary = analysis.summary;
 
   return (
     <main style={pageStyle}>
       <div style={wrapperStyle}>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", marginBottom: 20 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 12,
+            alignItems: "center",
+            marginBottom: 14
+          }}
+        >
           <button
             onClick={() => router.push("/")}
             style={{
@@ -242,73 +324,107 @@ export default function ResultPage() {
               border: "1px solid #475569",
               background: "#0f172a",
               color: "#fff",
-              padding: "12px 18px",
+              padding: "10px 14px",
               fontWeight: 700
             }}
           >
-            ← 입력 다시 하기
+            ← 다시 입력
           </button>
-          <div style={{ color: "#cbd5e1" }}>{result.ticker} 분석 결과</div>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <span style={chipStyle}>{result.ticker}</span>
+            <span style={chipStyle}>{personalization.holderView}</span>
+            <span style={chipStyle}>{personalization.styleLabel}</span>
+          </div>
         </div>
 
-        <div style={{ display: "grid", gap: 24 }}>
-          <div style={cardStyle}>
-            <div style={sectionTitle}>캔들차트</div>
-            <CandleChart
-              chartData={analysis.chart}
-              support={analysis.summary.support}
-              resistance={analysis.summary.resistance}
-            />
-            <div style={{ color: "#94a3b8", fontSize: 13, marginTop: 10 }}>
-              최근 약 3개월 구간 위주로 표시해서 가시성을 높였어.
+        <div style={{ ...cardStyle, padding: 16 }}>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 28, fontWeight: 800 }}>{summary.currentPrice}</div>
+            <div style={{ color: "#94a3b8", marginTop: 6 }}>
+              {result.stateHint || summary.state}
             </div>
           </div>
 
-          <div style={cardStyle}>
-            <div style={sectionTitle}>핵심 요약</div>
-            <div style={statGridStyle}>
-              <StatBox label="종목" value={result.ticker} />
-              <StatBox label="현재 상태" value={analysis.summary.state} />
-              <StatBox label="현재가" value={analysis.summary.currentPrice} />
-              <StatBox label="지지선 후보" value={analysis.summary.support} />
-              <StatBox label="저항선 후보" value={analysis.summary.resistance} />
-              <StatBox label="거래량 배수" value={`${analysis.summary.volumeRatio}배`} />
-            </div>
-          </div>
+          <CandleChart
+            chartData={analysis.chart}
+            support={summary.support}
+            resistance={summary.resistance}
+          />
 
-          <div style={cardStyle}>
-            <div style={sectionTitle}>개인화 요약</div>
-            <div style={statGridStyle}>
-              <StatBox label="모드" value={personalization.holderView} />
-              <StatBox label="투자 성향" value={personalization.styleLabel} />
-              <StatBox label="권장 추가매수 구간" value={personalization.suggestedAddBuyZone} />
-              <StatBox label="권장 손절 기준" value={personalization.suggestedStop} />
-              <StatBox label="1차 익절 후보" value={personalization.suggestedTakeProfit} />
-              <StatBox
-                label="현재 손익률"
-                value={personalization.pnlPercent == null ? "-" : `${personalization.pnlPercent}%`}
-              />
-            </div>
-          </div>
-
-          <div style={cardStyle}>
-            <div style={sectionTitle}>기술적 해설</div>
-            <div style={{ lineHeight: 1.85, color: "#e2e8f0" }}>{analysis.explanation || analysis.trendSummary || "루나가 흐름을 다시 정리중이야."}</div>
-            <ul style={{ marginTop: 16, color: "#cbd5e1", lineHeight: 1.8 }}>
-              {(analysis.lessons || []).map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          </div>
-
-          <div style={cardStyle}>
-            <div style={sectionTitle}>루나의 종합 의견</div>
-            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.95, color: "#e2e8f0" }}>
-              {result.aiOpinion}
+          <div
+            style={{
+              marginTop: 14,
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: 12
+            }}
+          >
+            <div style={{ ...cardStyle, padding: 14, borderRadius: 18 }}>
+              <div style={{ color: "#94a3b8", fontSize: 13, marginBottom: 8 }}>기술 요약</div>
+              <SummaryRow label="현재가" value={summary.currentPrice} />
+              <SummaryRow label="5일선" value={summary.ma5} />
+              <SummaryRow label="20일선" value={summary.ma20} />
+              <SummaryRow label="60일선" value={summary.ma60} />
+              <SummaryRow label="120일선" value={summary.ma120} />
+              <SummaryRow label="지지선" value={summary.support} />
+              <SummaryRow label="저항선" value={summary.resistance} />
+              <SummaryRow label="거래량" value={`${summary.volumeRatio}배`} />
             </div>
           </div>
         </div>
       </div>
+
+      <button
+        onClick={() => setSheetOpen(true)}
+        style={{
+          position: "fixed",
+          left: 16,
+          right: 16,
+          bottom: 16,
+          borderRadius: 18,
+          border: "none",
+          background: "#2563eb",
+          color: "#fff",
+          padding: "16px 18px",
+          fontSize: 17,
+          fontWeight: 800,
+          boxShadow: "0 12px 24px rgba(37,99,235,0.35)",
+          zIndex: 30
+        }}
+      >
+        루나 해설 보기
+      </button>
+
+      <BottomSheet open={sheetOpen} onClose={() => setSheetOpen(false)}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ fontSize: 20, fontWeight: 800 }}>루나 해설</div>
+          <button
+            onClick={() => setSheetOpen(false)}
+            style={{
+              border: "1px solid #475569",
+              background: "#0f172a",
+              color: "#fff",
+              borderRadius: 12,
+              padding: "8px 12px",
+              fontWeight: 700
+            }}
+          >
+            닫기
+          </button>
+        </div>
+
+        <div
+          style={{
+            whiteSpace: "pre-wrap",
+            lineHeight: 1.9,
+            color: "#e2e8f0",
+            fontSize: 16
+          }}
+        >
+          {result.aiOpinion}
+        </div>
+      </BottomSheet>
     </main>
   );
 }

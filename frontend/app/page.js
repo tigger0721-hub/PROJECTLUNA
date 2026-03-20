@@ -96,8 +96,11 @@ export default function HomePage() {
               <label style={labelStyle}>투자 성향</label>
               <select name="style" defaultValue="conservative" style={inputStyle}>
                 <option value="conservative">보수형</option>
-                <option value="trend">추세형</option>
                 <option value="pullback">눌림매수형</option>
+                <option value="trend">추세매수형</option>
+                <option value="swing">단기 스윙형</option>
+                <option value="protect_profit">수익보호형</option>
+                <option value="trend_partial">추세추종+분할익절형</option>
               </select>
             </div>
 
