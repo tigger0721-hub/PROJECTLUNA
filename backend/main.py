@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from io import StringIO
 from typing import Any, Dict, List, Optional
 
@@ -11,7 +12,7 @@ import httpx
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from openai import OpenAI
+from openai import APITimeoutError, OpenAI
 
 app = FastAPI(title="Luna Stock Chart Tutor API")
 
@@ -25,6 +26,16 @@ app.add_middleware(
 
 STOOQ_URL = "https://stooq.com/q/d/l/"
 logger = logging.getLogger(__name__)
+
+
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-nano")
+OPENAI_CONNECT_TIMEOUT_SEC = float(os.getenv("OPENAI_CONNECT_TIMEOUT_SEC", "2.5"))
+OPENAI_READ_TIMEOUT_SEC = float(os.getenv("OPENAI_READ_TIMEOUT_SEC", "6.0"))
+OPENAI_WRITE_TIMEOUT_SEC = float(os.getenv("OPENAI_WRITE_TIMEOUT_SEC", "6.0"))
+OPENAI_TOTAL_TIMEOUT_SEC = float(os.getenv("OPENAI_TOTAL_TIMEOUT_SEC", "8.0"))
+OPENAI_COMMENTARY_BUDGET_SEC = float(os.getenv("OPENAI_COMMENTARY_BUDGET_SEC", "8.5"))
+OPENAI_MAX_OUTPUT_TOKENS = int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "120"))
+
 
 STYLE_GUIDE = {
     "conservative": {
@@ -414,108 +425,92 @@ def generate_ai_opinion(
     summary = analysis["summary"]
     has_position = personalization["hasPosition"]
     system_prompt = """
-너는 "Luna"라는 이름의 친한 차트 메이트야.
-
-[ROLE]
-- 너는 애널리스트가 아니야.
-- 너는 보고서를 쓰는 사람이 아니야.
-- 사용자의 옆에 앉아서 차트를 같이 보는 대화 상대야.
-
-[TONE]
-- 한국어 반말만 써.
-- 따뜻하고 부드럽고 자연스럽게 말해.
-- 설명문보다 대화처럼 들리게 말해.
-
-[STRICTLY FORBIDDEN]
-- "~입니다", "~합니다" 같은 존댓말
-- 보고서/브리핑 톤
-- "관망", "권장", "구간입니다"
-- "보수적 접근", "리스크 관리", "매수 관점", "단기적으로 변동성"
-- 섹션 제목, 번호 목록, 긴 구조화 문단
-
-[PREFERRED STYLE EXAMPLES]
-- "오빠 지금 여기 좀 애매한 자리야"
-- "지금은 조금 더 기다리는 게 나아 보여"
-- "여기서 바로 들어가면 살짝 흔들릴 수 있어"
-- "보유 중이면 지지 깨지는지만 보면 될 것 같아"
-
-[OUTPUT RULES]
-- 짧게 써.
-- 전체는 3~5문장 안으로 끝내.
-- 반복하지 마.
-- 모바일에서 읽기 편하게 써.
-
-[OUTPUT FORMAT — MUST BE JSON]
-{
-  "summary": "한 줄 요약",
-  "commentary": "루나 스타일 자연스러운 해설 (3~5문장)"
-}
-
-[ANALYSIS BEHAVIOR]
-- 지표를 나열하지 말고, 지금 차트 위치의 의미를 먼저 해석해.
-- 사용자의 보유 여부와 투자 성향에 맞춰 말해.
-- 매수/매도 지시처럼 말하지 마.
-- 확정적인 단정 대신 가능성 중심으로 말해.
-- 가장 중요한 신호만 골라서 말해.
-
-[CRITICAL RULE]
-- 결과가 금융 보고서처럼 보이면 실패야.
-- 옆에서 같이 차트 보며 말하는 사람 같으면 성공이야.
-
-반드시 JSON 하나만 반환하고 코드블록은 쓰지 마.
+너는 루나야. 한국어 반말로, 친근하게 말해.
+보고서 톤/존댓말/딱딱한 용어는 금지.
+핵심만 짧게: summary 1문장 + commentary 2~3문장.
+절대 매수/매도 지시하지 말고 가능성 중심으로 말해.
+반드시 JSON 하나만 반환해: {"summary":"...","commentary":"..."}
 """.strip()
 
     user_prompt = f"""
-종목: {ticker.upper()}
-현재가: {summary['currentPrice']}
-보유상태: {"보유중" if has_position else "미보유"}
-투자성향: {personalization['styleLabel']}
-상태힌트: {summary['state']}
-
-차트 데이터:
-- 최근 흐름: {analysis['trendSummary']}
-- 지지: {summary['support']}
-- 저항: {summary['resistance']}
-- 거래량 배수: {summary['volumeRatio']}
-- 이동평균: 5일 {summary['ma5']}, 20일 {summary['ma20']}, 60일 {summary['ma60']}, 120일 {summary['ma120']}
-- 20일 범위: 고점 {summary['rangeHigh20']} / 저점 {summary['rangeLow20']}
-- 60일 범위: 고점 {summary['rangeHigh60']} / 저점 {summary['rangeLow60']}
-- 지지 후보: {analysis['supportCandidates']}
-- 저항 후보: {analysis['resistanceCandidates']}
-
-보유정보:
-- 평단가: {personalization['avgPrice']}
-- 수량: {personalization['quantity']}
-- 손익률: {personalization['pnlPercent']}%
-- 손익금액: {personalization['pnlAmount']}
-
-요청:
-- Luna 톤 반말로 짧게 말해줘.
-- 보고서처럼 쓰지 말고 대화처럼 써줘.
-- 3~5문장으로만 작성해줘.
-- 반드시 JSON 형식 {{summary, commentary}} 으로만 답해줘.
+종목 {ticker.upper()} | 현재가 {summary['currentPrice']} | 상태 {summary['state']}
+보유 {'예' if has_position else '아니오'} | 성향 {personalization['styleLabel']}
+지지 {summary['support']} / 저항 {summary['resistance']} / 거래량 {summary['volumeRatio']}배
+5일변화 {summary['change5Pct']}% / 20일변화 {summary['change20Pct']}%
+보유손익 {personalization['pnlPercent']}%
 """.strip()
 
+    prompt_chars = len(system_prompt) + len(user_prompt)
+    start_time = time.perf_counter()
+    logger.info(
+        "AI commentary request start ticker=%s model=%s prompt_chars=%d has_position=%s style=%s",
+        ticker.upper(),
+        OPENAI_MODEL,
+        prompt_chars,
+        has_position,
+        personalization["style"],
+    )
+
     try:
-        client = OpenAI(api_key=api_key)
+        client = OpenAI(
+            api_key=api_key,
+            timeout=httpx.Timeout(
+                timeout=OPENAI_TOTAL_TIMEOUT_SEC,
+                connect=OPENAI_CONNECT_TIMEOUT_SEC,
+                read=OPENAI_READ_TIMEOUT_SEC,
+                write=OPENAI_WRITE_TIMEOUT_SEC,
+            ),
+        )
         response = client.chat.completions.create(
-            model="gpt-5-mini",
+            model=OPENAI_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            timeout=25,
+            max_tokens=OPENAI_MAX_OUTPUT_TOKENS,
         )
 
         content = (response.choices[0].message.content or "").strip()
         parsed = _safe_json_parse(content)
 
+        elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+        logger.info(
+            "AI commentary request done ticker=%s model=%s elapsed_ms=%d output_chars=%d",
+            ticker.upper(),
+            OPENAI_MODEL,
+            elapsed_ms,
+            len(content),
+        )
+
         if parsed:
             normalized = _normalize_ai_opinion_payload(parsed)
             if normalized:
                 return normalized
+
+        logger.warning(
+            "AI commentary parse/tone fallback ticker=%s model=%s elapsed_ms=%d",
+            ticker.upper(),
+            OPENAI_MODEL,
+            elapsed_ms,
+        )
+    except APITimeoutError as e:
+        elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+        logger.exception(
+            "AI commentary timeout ticker=%s model=%s elapsed_ms=%d detail=%s",
+            ticker.upper(),
+            OPENAI_MODEL,
+            elapsed_ms,
+            repr(e),
+        )
     except Exception as e:
-        logger.exception("AI opinion generation failed: %s", e)
+        elapsed_ms = int((time.perf_counter() - start_time) * 1000)
+        logger.exception(
+            "AI commentary generation failed ticker=%s model=%s elapsed_ms=%d detail=%s",
+            ticker.upper(),
+            OPENAI_MODEL,
+            elapsed_ms,
+            repr(e),
+        )
 
     return _fallback_ai_opinion(summary)
 
@@ -555,7 +550,18 @@ async def analyze(
             quantity=quantity,
             style=style,
         )
-        ai_opinion = generate_ai_opinion(ticker, analysis, personalization)
+        try:
+            ai_opinion = await asyncio.wait_for(
+                asyncio.to_thread(generate_ai_opinion, ticker, analysis, personalization),
+                timeout=OPENAI_COMMENTARY_BUDGET_SEC,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "AI commentary budget exceeded ticker=%s budget_sec=%.2f",
+                ticker.upper(),
+                OPENAI_COMMENTARY_BUDGET_SEC,
+            )
+            ai_opinion = _fallback_ai_opinion(analysis["summary"])
         if (
             not ai_opinion
             or not isinstance(ai_opinion, dict)
