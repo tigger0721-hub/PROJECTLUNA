@@ -35,6 +35,12 @@ const chipStyle = {
   padding: "8px 12px"
 };
 
+const summaryCardStyle = {
+  background: "#0f172a",
+  borderRadius: 18,
+  padding: 14
+};
+
 function LoadingView() {
   const messages = useMemo(
     () => [
@@ -211,6 +217,19 @@ function SummaryRow({ label, value }) {
   );
 }
 
+function numberOrDash(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  return Number(value).toLocaleString("ko-KR", { maximumFractionDigits: 2 });
+}
+
+function movingAverageText(summary) {
+  const ma5 = numberOrDash(summary?.ma5);
+  const ma20 = numberOrDash(summary?.ma20);
+  const ma60 = numberOrDash(summary?.ma60);
+  const ma120 = numberOrDash(summary?.ma120);
+  return `5일 ${ma5} / 20일 ${ma20} / 60일 ${ma60} / 120일 ${ma120}`;
+}
+
 export default function ResultClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -302,13 +321,18 @@ export default function ResultClient() {
     );
   }
 
-  const analysis = result.analysis;
-  const personalization = result.personalization;
-  const summary = analysis.summary;
+  const analysis = result?.analysis || {};
+  const personalization = result?.personalization || {};
+  const summary = analysis?.summary || {};
+  const currentPrice = numberOrDash(summary?.currentPrice);
+  const support = numberOrDash(summary?.support);
+  const resistance = numberOrDash(summary?.resistance);
+  const volumeRatio = summary?.volumeRatio ? `${numberOrDash(summary?.volumeRatio)}배` : "-";
+  const aiOpinion = result?.aiOpinion || "오빠, 지금은 해설을 잠깐 못 불러왔어. 다시 눌러보자.";
 
   return (
     <main style={pageStyle}>
-      <div style={wrapperStyle}>
+      <div style={{ ...wrapperStyle, maxWidth: 960 }}>
         <div
           style={{
             display: "flex",
@@ -333,17 +357,17 @@ export default function ResultClient() {
           </button>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <span style={chipStyle}>{result.ticker}</span>
-            <span style={chipStyle}>{personalization.holderView}</span>
-            <span style={chipStyle}>{personalization.styleLabel}</span>
+            <span style={chipStyle}>{result?.ticker || "-"}</span>
+            <span style={chipStyle}>{personalization?.holderView || "-"}</span>
+            <span style={chipStyle}>{personalization?.styleLabel || "-"}</span>
           </div>
         </div>
 
         <div style={{ ...cardStyle, padding: 16 }}>
           <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: 28, fontWeight: 800 }}>{summary.currentPrice}</div>
+            <div style={{ fontSize: 28, fontWeight: 800 }}>{currentPrice}</div>
             <div style={{ color: "#94a3b8", marginTop: 6 }}>
-              {result.stateHint || summary.state}
+              {result?.stateHint || summary?.state || "상태 확인중"}
             </div>
           </div>
 
@@ -357,20 +381,17 @@ export default function ResultClient() {
             style={{
               marginTop: 14,
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gridTemplateColumns: "1fr",
               gap: 12
             }}
           >
-            <div style={{ ...cardStyle, padding: 14, borderRadius: 18 }}>
+            <div style={summaryCardStyle}>
               <div style={{ color: "#64748b", fontSize: 13, marginBottom: 8 }}>기술 요약</div>
-              <SummaryRow label="현재가" value={summary.currentPrice} />
-              <SummaryRow label="5일선" value={summary.ma5} />
-              <SummaryRow label="20일선" value={summary.ma20} />
-              <SummaryRow label="60일선" value={summary.ma60} />
-              <SummaryRow label="120일선" value={summary.ma120} />
-              <SummaryRow label="지지선" value={summary.support} />
-              <SummaryRow label="저항선" value={summary.resistance} />
-              <SummaryRow label="거래량" value={`${summary.volumeRatio}배`} />
+              <SummaryRow label="현재가" value={currentPrice} />
+              <SummaryRow label="이평선" value={movingAverageText(summary)} />
+              <SummaryRow label="지지" value={support} />
+              <SummaryRow label="저항" value={resistance} />
+              <SummaryRow label="거래량" value={volumeRatio} />
             </div>
           </div>
         </div>
@@ -423,7 +444,7 @@ export default function ResultClient() {
             fontSize: 16
           }}
         >
-          {result.aiOpinion}
+          {aiOpinion}
         </div>
       </BottomSheet>
     </main>
