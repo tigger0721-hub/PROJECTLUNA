@@ -360,11 +360,15 @@ def _safe_json_parse(raw: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _preview_text(raw: str, limit: int = 240) -> str:
+    compact = " ".join(raw.split())
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[:limit]}…"
+
+
 def _has_forbidden_tone(text: str) -> bool:
     banned = [
-        "입니다",
-        "합니다",
-        "하세요",
         "해라",
         "하지 마라",
         "해야 한다",
@@ -388,16 +392,16 @@ def _fallback_ai_opinion(summary: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
-def _normalize_ai_opinion_payload(payload: Dict[str, Any]) -> Optional[Dict[str, str]]:
+def _normalize_ai_opinion_payload(payload: Dict[str, Any]) -> tuple[Optional[Dict[str, str]], Optional[str]]:
     summary = str(payload.get("summary", "")).strip()
     commentary = str(payload.get("commentary", "")).strip()
     if not summary or not commentary:
-        return None
+        return None, "missing_fields"
     summary = summary[:70].strip()
     commentary = commentary[:540].strip()
     if _has_forbidden_tone(summary) or _has_forbidden_tone(commentary):
-        return None
-    return {"summary": summary, "commentary": commentary}
+        return None, "forbidden_tone"
+    return {"summary": summary, "commentary": commentary}, None
 
 
 def _build_mode_behavior_prompt(has_position: bool) -> str:
@@ -426,6 +430,7 @@ def _build_system_prompt(has_position: bool) -> str:
         "너는 Luna야. 사용자의 옆에서 차트 같이 보는 한국인 트레이딩 메이트처럼 말해. "
         "항상 한국어 반말, 따뜻하고 자연스러운 대화체만 써. 보고서 문체, 분석 리포트 표현, 딱딱한 결론형 문장 금지. "
         "출력은 꼭 JSON 객체 하나만: {\"summary\":\"\", \"commentary\":\"\"}. "
+        "JSON 외의 텍스트, 코드펜스(예: ```json), 머리말/꼬리말을 절대 출력하지 마. "
         "summary는 1문장 짧게, commentary는 2~5문장으로 실전 행동이 느껴지게 써. "
         "commentary에 불릿, 번호, 제목, 라벨(상황 해석/시나리오/행동 기준/멘탈 케어) 절대 쓰지 마. "
         "문장 흐름 안에 상황 해석, 시나리오 분기, 행동 기준, 멘탈 케어를 모두 녹여. "
@@ -478,19 +483,39 @@ def generate_ai_opinion(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            response_format={"type": "json_object"},
             max_completion_tokens=320,
             timeout=httpx.Timeout(40.0, connect=5.0, read=35.0, write=10.0),
         )
 
         content = (response.choices[0].message.content or "").strip()
+        content_length = len(content)
+        logger.info(
+            "AI opinion raw response received: length=%d preview=%s",
+            content_length,
+            _preview_text(content),
+        )
+
         parsed = _safe_json_parse(content)
+        parse_succeeded = parsed is not None
+        normalization_failed = False
+        forbidden_tone_failed = False
 
         if parsed:
-            normalized = _normalize_ai_opinion_payload(parsed)
+            normalized, normalize_reason = _normalize_ai_opinion_payload(parsed)
             if normalized:
                 elapsed = time.perf_counter() - started_at
                 logger.info("AI opinion generation succeeded in %.3fs", elapsed)
                 return normalized
+            normalization_failed = True
+            forbidden_tone_failed = normalize_reason == "forbidden_tone"
+
+        logger.warning(
+            "AI opinion post-process failed: parse_succeeded=%s normalization_failed=%s forbidden_tone_failed=%s",
+            parse_succeeded,
+            normalization_failed,
+            forbidden_tone_failed,
+        )
     except Exception as e:
         elapsed = time.perf_counter() - started_at
         logger.exception("AI opinion generation failed in %.3fs: %s", elapsed, e)
