@@ -66,6 +66,8 @@ function LoadingView() {
   const [dots, setDots] = useState("");
   const [messageIndex, setMessageIndex] = useState(0);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [imagesPreloaded, setImagesPreloaded] = useState(false);
+  const [imageVisible, setImageVisible] = useState(false);
 
   useEffect(() => {
     const dotsInterval = setInterval(() => {
@@ -83,6 +85,43 @@ function LoadingView() {
   }, [messages]);
 
   useEffect(() => {
+    let active = true;
+
+    const preloadImages = async () => {
+      await Promise.all(
+        lunaImages.map(
+          (src) =>
+            new Promise((resolve) => {
+              const image = new window.Image();
+              image.src = src;
+
+              if (image.complete) {
+                resolve();
+                return;
+              }
+
+              image.onload = resolve;
+              image.onerror = resolve;
+            })
+        )
+      );
+
+      if (active) {
+        setImagesPreloaded(true);
+        setImageVisible(true);
+      }
+    };
+
+    preloadImages();
+
+    return () => {
+      active = false;
+    };
+  }, [lunaImages]);
+
+  useEffect(() => {
+    if (!imagesPreloaded) return undefined;
+
     const imageInterval = setInterval(() => {
       setCurrentImageIndex((prev) => (prev + 1) % lunaImages.length);
     }, 1200);
@@ -90,7 +129,17 @@ function LoadingView() {
     return () => {
       clearInterval(imageInterval);
     };
-  }, [lunaImages]);
+  }, [imagesPreloaded, lunaImages]);
+
+  useEffect(() => {
+    if (!imagesPreloaded) return;
+    setImageVisible(false);
+    const fadeInTimer = setTimeout(() => {
+      setImageVisible(true);
+    }, 80);
+
+    return () => clearTimeout(fadeInTimer);
+  }, [currentImageIndex, imagesPreloaded]);
 
   return (
     <main style={pageStyle}>
@@ -107,14 +156,16 @@ function LoadingView() {
         >
           <div style={{ marginBottom: 20 }}>
             <img
-              key={lunaImages[currentImageIndex]}
               src={lunaImages[currentImageIndex]}
               alt="루나 로딩 이미지"
               style={{
                 width: "min(160px, 42vw)",
-                height: "auto",
+                aspectRatio: "1 / 1",
+                objectFit: "contain",
                 borderRadius: 20,
-                animation: "lunaFade 300ms ease"
+                display: "block",
+                opacity: imageVisible ? 1 : 0,
+                transition: "opacity 220ms ease"
               }}
             />
           </div>
@@ -172,10 +223,6 @@ function LoadingView() {
           100% { transform: translateX(320%); }
         }
 
-        @keyframes lunaFade {
-          0% { opacity: 0.45; }
-          100% { opacity: 1; }
-        }
       `}</style>
     </main>
   );
