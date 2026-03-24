@@ -517,7 +517,7 @@ def generate_ai_opinion(
     try:
         client = OpenAI(api_key=api_key)
         response = client.responses.create(
-            model="gpt-5-mini",
+            model="gpt-4o-mini",
             instructions=system_prompt,
             input=user_prompt,
             text={
