@@ -345,6 +345,20 @@ def build_personalization(
 
 def _safe_json_parse(raw: str) -> Optional[Dict[str, Any]]:
     raw = raw.strip()
+    if not raw:
+        return None
+
+    try:
+        loaded = json.loads(raw)
+        if isinstance(loaded, dict):
+            return loaded
+        if isinstance(loaded, str):
+            loaded_nested = json.loads(loaded)
+            if isinstance(loaded_nested, dict):
+                return loaded_nested
+    except Exception:
+        pass
+
     if raw.startswith("```"):
         raw = raw.strip("`")
         if raw.startswith("json"):
@@ -365,6 +379,45 @@ def _preview_text(raw: str, limit: int = 240) -> str:
     if len(compact) <= limit:
         return compact
     return f"{compact[:limit]}…"
+
+
+def _extract_message_content(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        chunks: list[str] = []
+        for part in content:
+            if isinstance(part, str):
+                chunks.append(part)
+                continue
+            if isinstance(part, dict):
+                for key in ("text", "content", "output_text"):
+                    value = part.get(key)
+                    if isinstance(value, str) and value.strip():
+                        chunks.append(value)
+                        break
+                continue
+            text_attr = getattr(part, "text", None)
+            if isinstance(text_attr, str) and text_attr.strip():
+                chunks.append(text_attr)
+                continue
+            if hasattr(part, "model_dump"):
+                dumped = part.model_dump()
+                if isinstance(dumped, dict):
+                    for key in ("text", "content", "output_text"):
+                        value = dumped.get(key)
+                        if isinstance(value, str) and value.strip():
+                            chunks.append(value)
+                            break
+        return "\n".join(chunks).strip()
+    if isinstance(content, dict):
+        for key in ("text", "content", "output_text"):
+            value = content.get(key)
+            if isinstance(value, str):
+                return value
+    return str(content)
 
 
 def _has_forbidden_tone(text: str) -> bool:
@@ -488,9 +541,21 @@ def generate_ai_opinion(
             timeout=httpx.Timeout(40.0, connect=5.0, read=35.0, write=10.0),
         )
 
-        content = (response.choices[0].message.content or "").strip()
+        raw_content = response.choices[0].message.content
+        content = _extract_message_content(raw_content).strip()
         content_length = len(content)
-        logger.info(
+        logger.warning(
+            "AI opinion raw response debug: type=%s empty=%s repr=%s",
+            type(raw_content).__name__,
+            not bool(content),
+            _preview_text(repr(raw_content), limit=600),
+        )
+        if hasattr(response.choices[0].message, "model_dump"):
+            logger.warning(
+                "AI opinion message shape=%s",
+                _preview_text(repr(response.choices[0].message.model_dump()), limit=600),
+            )
+        logger.warning(
             "AI opinion raw response received: length=%d preview=%s",
             content_length,
             _preview_text(content),
