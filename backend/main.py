@@ -457,6 +457,64 @@ def _normalize_ai_opinion_payload(payload: Dict[str, Any]) -> tuple[Optional[Dic
     return {"summary": summary, "commentary": commentary}, None
 
 
+def _build_style_behavior_prompt(style: str, has_position: bool) -> str:
+    style_key = style if style in STYLE_GUIDE else "conservative"
+
+    if has_position:
+        holder_bias = {
+            "conservative": (
+                "포지션이 있어도 무리해서 물타기하지 말고 확인 우선으로 안내해. "
+                "지지 이탈 시엔 미련 없이 리스크를 줄이는 쪽으로 기울여."
+            ),
+            "pullback": (
+                "보유 중 추가 대응은 급등 추격보다 눌림·지지 확인 쪽으로 유도해. "
+                "평균단가 개선도 반등 확인이 붙을 때만 신중하게 언급해."
+            ),
+            "trend": (
+                "추세가 강하면 보유를 조금 더 열어두되, 돌파 실패 신호가 나오면 빠르게 방어하도록 균형 있게 말해."
+            ),
+            "swing": (
+                "짧은 호흡의 트레이드 관점으로 진입·손절·목표가를 더 또렷하게 잡아주고, 대응 속도는 조금 빠르게 제안해."
+            ),
+            "protect_profit": (
+                "이미 이익이 난 구간이면 추가 수익보다 이익 보전을 우선으로 잡아. "
+                "반등 시 부분 익절·트레일링처럼 이익 반납을 줄이는 쪽으로 기울여."
+            ),
+            "trend_partial": (
+                "추세 지속 가능성은 열어두되 전량 홀딩보다 분할 익절을 자연스럽게 섞어. "
+                "남은 물량은 추세 추종, 일부는 먼저 잠그는 균형을 유지해."
+            ),
+        }
+        return holder_bias[style_key]
+
+    viewer_bias = {
+        "conservative": (
+            "서두르는 진입보다 확인 신호를 우선하게 해. "
+            "애매한 중간값 추격은 피하고 기다리는 선택을 편하게 만들어줘."
+        ),
+        "pullback": (
+            "돌파 추격보다 지지·눌림 진입을 선호하게 해. "
+            "무리한 고점 추격은 피하고 더 나은 진입 구간을 기다리게 유도해."
+        ),
+        "trend": (
+            "추세가 강하면 돌파/안착 추종 진입을 허용해도 돼. "
+            "다만 확인 없는 추격은 피하고 조건 충족 시에만 조금 공격적으로 안내해."
+        ),
+        "swing": (
+            "짧은 구간 매매 관점으로 entry-stop-target 프레이밍을 선명하게 제시해. "
+            "보수적 장기 설명보다 당장 실행 가능한 전술적 문장에 집중해."
+        ),
+        "protect_profit": (
+            "진입 자체도 손익비와 되돌림 리스크를 먼저 보고 보수적으로 접근해. "
+            "무리한 추격보다 리스크가 작은 자리만 골라보게 해."
+        ),
+        "trend_partial": (
+            "추세 추종 진입은 허용하되 목표가 도달 시 일부 이익 실현까지 미리 염두에 두게 안내해."
+        ),
+    }
+    return viewer_bias[style_key]
+
+
 def _build_mode_behavior_prompt(has_position: bool) -> str:
     if has_position:
         return (
@@ -477,15 +535,17 @@ def _build_mode_behavior_prompt(has_position: bool) -> str:
     )
 
 
-def _build_system_prompt(has_position: bool) -> str:
+def _build_system_prompt(has_position: bool, style: str) -> str:
     behavior_prompt = _build_mode_behavior_prompt(has_position)
+    style_behavior_prompt = _build_style_behavior_prompt(style, has_position)
     return (
         "너는 Luna. 한국어 반말의 친근한 트레이딩 메이트 톤으로만 답해. "
         "반드시 JSON 객체 하나만 출력: {\"summary\":\"\", \"commentary\":\"\"}. "
         "summary는 1문장, commentary는 2~4문장으로 짧고 실전 행동 중심으로 써. "
         "보고서체, 설명체, 체크리스트 말투 금지. 정의하듯 말하지 말고 차트를 같이 보는 대화처럼 말해. "
+        "투자 성향 이름(예: 보수형/수익보호형 같은 라벨)을 문장에 드러내지 말고, 판단 기울기만 자연스럽게 녹여. "
         "불릿/번호/제목/코드펜스/부가 텍스트 금지. "
-        f"{behavior_prompt}"
+        f"{behavior_prompt} {style_behavior_prompt}"
     )
 
 
@@ -504,12 +564,14 @@ def generate_ai_opinion(
 
     summary = analysis["summary"]
     has_position = personalization["hasPosition"]
-    system_prompt = _build_system_prompt(has_position)
+    style = personalization.get("style", "conservative")
+    system_prompt = _build_system_prompt(has_position, style)
 
     compact_payload = {
         "ticker": ticker.upper(),
         "price": summary["currentPrice"],
         "mode": "holder" if has_position else "viewer",
+        "style": style,
         "state": summary["state"],
         "support": summary["support"],
         "resistance": summary["resistance"],
