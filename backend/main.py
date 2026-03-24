@@ -368,8 +368,6 @@ def _has_forbidden_tone(text: str) -> bool:
         "해라",
         "하지 마라",
         "해야 한다",
-        "관망",
-        "권장",
         "구간입니다",
         "보수적 접근",
         "리스크 관리",
@@ -396,10 +394,43 @@ def _normalize_ai_opinion_payload(payload: Dict[str, Any]) -> Optional[Dict[str,
     if not summary or not commentary:
         return None
     summary = summary[:70].strip()
-    commentary = commentary[:260].strip()
+    commentary = commentary[:540].strip()
     if _has_forbidden_tone(summary) or _has_forbidden_tone(commentary):
         return None
     return {"summary": summary, "commentary": commentary}
+
+
+def _build_mode_behavior_prompt(has_position: bool) -> str:
+    if has_position:
+        return (
+            "보유자 모드야. 반드시 흐름을 이렇게 풀어줘: "
+            "먼저 현재 자리를 실전 용어로 한 줄 정의해(예: 수익 관리 구간, 추가매수 검토 구간, 관망 구간, 손절 판단 구간, 반등 확인 구간). "
+            "그 다음 지금 당장 뭘 우선해야 하는지 분명하게 말해. 필요하면 추가매수 금지나 무리 금지처럼 직접 제지해도 돼. "
+            "이어서 지지 유지, 지지 이탈, 반등 지속 시나리오를 자연스럽게 붙여서 행동 기준을 알려줘. "
+            "가능하면 손절 기준, 분할익절 기준, 추가매수 기준을 가격과 함께 넣어줘. "
+            "멘탈 케어 문장을 마지막에 자연스럽게 한 줄 섞어줘."
+        )
+    return (
+        "미보유자 모드야. 반드시 흐름을 이렇게 풀어줘: "
+        "먼저 현재 자리를 신규 진입 가능한 자리/기다려야 하는 자리/추격 위험 자리/돌파 확인 자리/눌림 확인 자리 중 하나 성격으로 한 줄 정의해. "
+        "그 다음 지금 당장 뭘 우선해야 하는지 분명하게 말해. 추격이 위험하면 바로 추격하지 말라고 직접 말해도 돼. "
+        "이어서 눌림 진입, 돌파 진입, 대기(무진입) 시나리오를 자연스럽게 붙여서 행동 기준을 알려줘. "
+        "가능하면 후보 진입 구간, 진입 후 손절 기준, 1차 목표 구간을 가격과 함께 넣어줘. "
+        "멘탈 케어 문장을 마지막에 자연스럽게 한 줄 섞어줘."
+    )
+
+
+def _build_system_prompt(has_position: bool) -> str:
+    behavior_prompt = _build_mode_behavior_prompt(has_position)
+    return (
+        "너는 Luna야. 사용자의 옆에서 차트 같이 보는 한국인 트레이딩 메이트처럼 말해. "
+        "항상 한국어 반말, 따뜻하고 자연스러운 대화체만 써. 보고서 문체, 분석 리포트 표현, 딱딱한 결론형 문장 금지. "
+        "출력은 꼭 JSON 객체 하나만: {\"summary\":\"\", \"commentary\":\"\"}. "
+        "summary는 1문장 짧게, commentary는 2~5문장으로 실전 행동이 느껴지게 써. "
+        "commentary에 불릿, 번호, 제목, 라벨(상황 해석/시나리오/행동 기준/멘탈 케어) 절대 쓰지 마. "
+        "문장 흐름 안에 상황 해석, 시나리오 분기, 행동 기준, 멘탈 케어를 모두 녹여. "
+        f"{behavior_prompt}"
+    )
 
 
 def generate_ai_opinion(
@@ -417,11 +448,7 @@ def generate_ai_opinion(
 
     summary = analysis["summary"]
     has_position = personalization["hasPosition"]
-    system_prompt = (
-        "너는 Luna. 한국어 반말로만, 보고서 톤 없이 짧고 자연스럽게 말해. "
-        "매수/매도 지시 금지, 가능성 중심으로 2~3문장만. "
-        "반드시 JSON {\"summary\":\"\", \"commentary\":\"\"}만 반환."
-    )
+    system_prompt = _build_system_prompt(has_position)
 
     compact_payload = {
         "ticker": ticker.upper(),
@@ -432,9 +459,14 @@ def generate_ai_opinion(
         "trend": analysis["trendSummary"],
         "support": summary["support"],
         "resistance": summary["resistance"],
+        "addBuyZone": personalization["suggestedAddBuyZone"],
+        "stopLine": personalization["suggestedStop"],
+        "firstTakeProfit": personalization["suggestedTakeProfit"],
         "volumeRatio": summary["volumeRatio"],
         "ma": [summary["ma5"], summary["ma20"], summary["ma60"], summary["ma120"]],
         "pnlPercent": personalization["pnlPercent"],
+        "supportCandidates": analysis.get("supportCandidates", []),
+        "resistanceCandidates": analysis.get("resistanceCandidates", []),
     }
     user_prompt = f"입력 데이터(JSON): {json.dumps(compact_payload, ensure_ascii=False)}"
 
@@ -446,7 +478,7 @@ def generate_ai_opinion(
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            max_completion_tokens=180,
+            max_completion_tokens=320,
             timeout=httpx.Timeout(40.0, connect=5.0, read=35.0, write=10.0),
         )
 
