@@ -67,7 +67,6 @@ function LoadingView() {
   const [messageIndex, setMessageIndex] = useState(0);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [imagesPreloaded, setImagesPreloaded] = useState(false);
-  const [imageVisible, setImageVisible] = useState(false);
 
   useEffect(() => {
     const dotsInterval = setInterval(() => {
@@ -108,7 +107,6 @@ function LoadingView() {
 
       if (active) {
         setImagesPreloaded(true);
-        setImageVisible(true);
       }
     };
 
@@ -131,16 +129,6 @@ function LoadingView() {
     };
   }, [imagesPreloaded, lunaImages]);
 
-  useEffect(() => {
-    if (!imagesPreloaded) return;
-    setImageVisible(false);
-    const fadeInTimer = setTimeout(() => {
-      setImageVisible(true);
-    }, 80);
-
-    return () => clearTimeout(fadeInTimer);
-  }, [currentImageIndex, imagesPreloaded]);
-
   return (
     <main style={pageStyle}>
       <div style={{ ...wrapperStyle, maxWidth: 720 }}>
@@ -154,20 +142,33 @@ function LoadingView() {
             padding: "40px 24px"
           }}
         >
-          <div style={{ marginBottom: 20 }}>
-            <img
-              src={lunaImages[currentImageIndex]}
-              alt="루나 로딩 이미지"
-              style={{
-                width: "min(160px, 42vw)",
-                aspectRatio: "1 / 1",
-                objectFit: "contain",
-                borderRadius: 20,
-                display: "block",
-                opacity: imageVisible ? 1 : 0,
-                transition: "opacity 220ms ease"
-              }}
-            />
+          <div
+            style={{
+              marginBottom: 20,
+              position: "relative",
+              width: "min(160px, 42vw)",
+              aspectRatio: "1 / 1"
+            }}
+          >
+            {lunaImages.map((src, index) => (
+              <img
+                key={src}
+                src={src}
+                alt="루나 로딩 이미지"
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "contain",
+                  borderRadius: 20,
+                  display: "block",
+                  opacity:
+                    imagesPreloaded && currentImageIndex === index ? 1 : 0,
+                  transition: "opacity 300ms ease"
+                }}
+              />
+            ))}
           </div>
 
           <h1 style={{ margin: 0, fontSize: 28, lineHeight: 1.25 }}>
