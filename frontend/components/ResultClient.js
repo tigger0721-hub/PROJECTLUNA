@@ -42,6 +42,15 @@ const summaryCardStyle = {
 };
 
 function LoadingView() {
+  const lunaImages = useMemo(
+    () => [
+      "/images/luna/luna_idle.png",
+      "/images/luna/luna_thinking.png",
+      "/images/luna/luna_happy.png"
+    ],
+    []
+  );
+
   const messages = useMemo(
     () => [
       "오빠, 루나가 차트 흐름 먼저 보고 있어.",
@@ -56,6 +65,7 @@ function LoadingView() {
 
   const [dots, setDots] = useState("");
   const [messageIndex, setMessageIndex] = useState(0);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   useEffect(() => {
     const dotsInterval = setInterval(() => {
@@ -72,6 +82,16 @@ function LoadingView() {
     };
   }, [messages]);
 
+  useEffect(() => {
+    const imageInterval = setInterval(() => {
+      setCurrentImageIndex((prev) => (prev + 1) % lunaImages.length);
+    }, 1200);
+
+    return () => {
+      clearInterval(imageInterval);
+    };
+  }, [lunaImages]);
+
   return (
     <main style={pageStyle}>
       <div style={{ ...wrapperStyle, maxWidth: 720 }}>
@@ -87,12 +107,14 @@ function LoadingView() {
         >
           <div style={{ marginBottom: 20 }}>
             <img
-              src="/luna-loading.png"
+              key={lunaImages[currentImageIndex]}
+              src={lunaImages[currentImageIndex]}
               alt="루나 로딩 이미지"
               style={{
-                width: "min(260px, 70vw)",
+                width: "min(160px, 42vw)",
                 height: "auto",
-                borderRadius: 20
+                borderRadius: 20,
+                animation: "lunaFade 300ms ease"
               }}
             />
           </div>
@@ -148,6 +170,11 @@ function LoadingView() {
         @keyframes loadingBar {
           0% { transform: translateX(-120%); }
           100% { transform: translateX(320%); }
+        }
+
+        @keyframes lunaFade {
+          0% { opacity: 0.45; }
+          100% { opacity: 1; }
         }
       `}</style>
     </main>
