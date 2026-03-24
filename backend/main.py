@@ -530,19 +530,32 @@ def generate_ai_opinion(
 
     try:
         client = OpenAI(api_key=api_key)
-        response = client.chat.completions.create(
+        response = client.responses.create(
             model="gpt-5-mini",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format={"type": "json_object"},
-            max_completion_tokens=320,
+            instructions=system_prompt,
+            input=user_prompt,
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "luna_commentary",
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "summary": {"type": "string"},
+                            "commentary": {"type": "string"},
+                        },
+                        "required": ["summary", "commentary"],
+                        "additionalProperties": False,
+                    },
+                    "strict": True,
+                }
+            },
+            max_output_tokens=320,
             timeout=httpx.Timeout(40.0, connect=5.0, read=35.0, write=10.0),
         )
 
-        raw_content = response.choices[0].message.content
-        content = _extract_message_content(raw_content).strip()
+        raw_content = getattr(response, "output_text", "")
+        content = str(raw_content or "").strip()
         content_length = len(content)
         logger.warning(
             "AI opinion raw response debug: type=%s empty=%s repr=%s",
@@ -550,10 +563,10 @@ def generate_ai_opinion(
             not bool(content),
             _preview_text(repr(raw_content), limit=600),
         )
-        if hasattr(response.choices[0].message, "model_dump"):
+        if hasattr(response, "model_dump"):
             logger.warning(
-                "AI opinion message shape=%s",
-                _preview_text(repr(response.choices[0].message.model_dump()), limit=600),
+                "AI opinion response shape=%s",
+                _preview_text(repr(response.model_dump()), limit=600),
             )
         logger.warning(
             "AI opinion raw response received: length=%d preview=%s",
