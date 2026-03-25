@@ -408,8 +408,8 @@ export default function ResultClient() {
   const personalization = result?.personalization || {};
   const summary = analysis?.summary || {};
   const currentPrice = numberOrDash(summary?.currentPrice);
-  const support = numberOrDash(summary?.support);
-  const resistance = numberOrDash(summary?.resistance);
+  const support = numberOrDash(summary?.activeSupport ?? summary?.support);
+  const resistance = numberOrDash(summary?.activeResistance ?? summary?.resistance);
   const volumeRatio = summary?.volumeRatio ? `${numberOrDash(summary?.volumeRatio)}배` : "-";
   const aiOpinion = result?.aiOpinion || {};
   const aiSummary = aiOpinion?.summary || "지금은 루나 한 줄 요약을 잠깐 못 불러왔어.";
@@ -458,8 +458,8 @@ export default function ResultClient() {
 
           <CandleChart
             chartData={analysis.chart}
-            support={summary.support}
-            resistance={summary.resistance}
+            support={summary?.activeSupport ?? summary?.support}
+            resistance={summary?.activeResistance ?? summary?.resistance}
           />
 
           <div
