@@ -1,0 +1,30 @@
+[
+  {
+    "symbol": "005930",
+    "name_ko": "삼성전자",
+    "name_en": "Samsung Electronics",
+    "market": "KRX_KOSPI",
+    "aliases": "삼성전자,samsung,samsung electronics,005930"
+  },
+  {
+    "symbol": "000660",
+    "name_ko": "SK하이닉스",
+    "name_en": "SK hynix",
+    "market": "KRX_KOSPI",
+    "aliases": "sk hynix,sk하이닉스,000660"
+  },
+  {
+    "symbol": "035420",
+    "name_ko": "NAVER",
+    "name_en": "NAVER",
+    "market": "KRX_KOSPI",
+    "aliases": "naver,네이버,035420"
+  },
+  {
+    "symbol": "196170",
+    "name_ko": "알테오젠",
+    "name_en": "Alteogen",
+    "market": "KRX_KOSDAQ",
+    "aliases": "알테오젠,alteogen,196170"
+  }
+]
