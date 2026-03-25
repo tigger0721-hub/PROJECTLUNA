@@ -125,6 +125,16 @@ def build_recent_trend_summary(df: pd.DataFrame) -> str:
     return f"단기와 중기 흐름이 섞여 있어서 방향성이 아주 강하진 않아. 5일 기준 {change_5:.1f}%, 20일 기준 {change_20:.1f}% 움직였어."
 
 
+def classify_trend_state(change_percent: float, recent_move_percent_5: float, daily_range_percent: float, ma20_gap_percent: float) -> str:
+    if change_percent <= -4.0 or (recent_move_percent_5 <= -8.0 and ma20_gap_percent <= -1.0):
+        return "sharp_drop"
+    if change_percent >= 4.0 or (recent_move_percent_5 >= 8.0 and ma20_gap_percent >= 1.0):
+        return "sharp_rise"
+    if abs(change_percent) <= 1.2 and daily_range_percent <= 2.2:
+        return "range"
+    return "normal"
+
+
 def build_analysis(prices: List[Dict[str, Any]]) -> Dict[str, Any]:
     if len(prices) < 120:
         raise ValueError("분석하려면 최소 120일 정도 데이터가 필요해")
@@ -140,6 +150,9 @@ def build_analysis(prices: List[Dict[str, Any]]) -> Dict[str, Any]:
     prev = df.iloc[-2]
 
     current_price = float(latest["close"])
+    prev_close = float(prev["close"]) if pd.notna(prev["close"]) else current_price
+    change_percent = ((current_price - prev_close) / prev_close * 100) if prev_close else 0.0
+    daily_range_percent = ((float(latest["high"]) - float(latest["low"])) / current_price * 100) if current_price else 0.0
     ma5 = float(latest["ma5"]) if pd.notna(latest["ma5"]) else current_price
     ma20 = float(latest["ma20"]) if pd.notna(latest["ma20"]) else current_price
     ma60 = float(latest["ma60"]) if pd.notna(latest["ma60"]) else current_price
@@ -176,6 +189,10 @@ def build_analysis(prices: List[Dict[str, Any]]) -> Dict[str, Any]:
     near_breakout = current_price >= recent_20_high * 0.985
     pullback_zone = above_ma20 and current_price < recent_20_high * 0.97
     breakdown = bool(current_price < ma20 and pd.notna(prev["ma20"]) and prev["close"] >= prev["ma20"])
+    recent_5_close = float(df.iloc[-6]["close"]) if len(df) >= 6 else current_price
+    recent_move_percent_5 = ((current_price - recent_5_close) / recent_5_close * 100) if recent_5_close else 0.0
+    ma20_gap_percent = ((current_price - ma20) / ma20 * 100) if ma20 else 0.0
+    trend_state = classify_trend_state(change_percent, recent_move_percent_5, daily_range_percent, ma20_gap_percent)
 
     if near_breakout and strong_volume and above_ma20:
         state = "돌파 시도"
@@ -238,6 +255,11 @@ def build_analysis(prices: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "summary": {
             "currentPrice": round(current_price, 2),
+            "prevClose": round(prev_close, 2),
+            "changePercent": round(change_percent, 2),
+            "dailyRangePercent": round(daily_range_percent, 2),
+            "recentMovePercent5": round(recent_move_percent_5, 2),
+            "trendState": trend_state,
             "ma5": round(ma5, 2),
             "ma20": round(ma20, 2),
             "ma60": round(ma60, 2),
@@ -272,6 +294,10 @@ def build_state_hint(summary: Dict[str, Any], has_position: bool, avg_price: Opt
     resistance = summary["resistance"]
     state = summary["state"]
     ma20 = summary["ma20"]
+    trend_state = summary.get("trendState")
+
+    if trend_state == "sharp_drop":
+        return "급락 방어 우선 구간"
 
     if has_position and avg_price is not None:
         pnl = ((current - avg_price) / avg_price) * 100 if avg_price else 0
@@ -435,6 +461,16 @@ def _has_forbidden_tone(text: str) -> bool:
 
 
 def _fallback_ai_opinion(summary: Dict[str, Any]) -> Dict[str, str]:
+    trend_state = summary.get("trendState", "normal")
+    if trend_state == "sharp_drop":
+        return {
+            "summary": "지금은 급락 구간이라 수익보다 방어 확인이 먼저야.",
+            "commentary": (
+                f"오늘 {summary.get('changePercent', 0)}% 밀린 급락 흐름이라 지지 근처라도 성급한 진입은 위험해. "
+                f"{summary['support']} 지지에서 반등이 붙고 거래량이 살아나는지 확인되기 전엔 기다리는 게 좋아. "
+                f"보유 중이면 {summary['support']} 이탈 시 손실 확대로 이어질 수 있어서 비중 줄일 기준부터 먼저 잡자."
+            ),
+        }
     return {
         "summary": "지금은 급하게 판단하기보다 기준 자리 확인이 먼저야.",
         "commentary": (
@@ -557,8 +593,11 @@ def _build_system_prompt(has_position: bool, style: str) -> str:
         "너는 Luna. 한국어 반말의 친근한 트레이딩 메이트 톤으로만 답해. "
         "반드시 JSON 객체 하나만 출력: {\"summary\":\"\", \"commentary\":\"\"}. "
         "summary는 1문장, commentary는 2~4문장으로 짧고 실전 행동 중심으로 써. "
-        "의미 있는 행동 제안마다 이유를 바로 붙이고, 가능하면 한 문장 안에서 행동과 이유를 같이 말해. "
+        "wait/entry/추격주의/추가매수/hold/부분익절/손절 같은 의미 있는 행동 제안마다 이유를 바로 붙이고, 가능하면 한 문장 안에서 행동과 이유를 같이 말해. "
         "행동과 이유를 멀리 떼어놓지 말고, 이유는 지지/저항·거래량·추세·손절 기준 같은 차트 근거로 써. "
+        "입력의 trendState가 sharp_drop이면 방어를 최우선으로 보고, 지지 근처라는 이유만으로 매수 제안을 하지 마. "
+        "sharp_drop에서는 반등 확인, 지지 안정, 거래량 회복 같은 확인 신호가 있을 때만 진입을 제한적으로 허용해. "
+        "sharp_drop + holder면 손절/비중축소 같은 자금보호 기준을 먼저 제시하고, sharp_drop + viewer면 기본값을 관망으로 둬. "
         "보고서체, 설명체, 체크리스트 말투 금지. 정의하듯 말하지 말고 차트를 같이 보는 대화처럼 말해. "
         "투자 성향 이름(예: 보수형/수익보호형 같은 라벨)을 문장에 드러내지 말고, 판단 기울기만 자연스럽게 녹여. "
         "불릿/번호/제목/코드펜스/부가 텍스트 금지. "
@@ -587,6 +626,11 @@ def generate_ai_opinion(
     compact_payload = {
         "ticker": ticker.upper(),
         "price": summary["currentPrice"],
+        "prevClose": summary["prevClose"],
+        "changePercent": summary["changePercent"],
+        "dailyRangePercent": summary["dailyRangePercent"],
+        "recentMovePercent5": summary["recentMovePercent5"],
+        "trendState": summary["trendState"],
         "mode": "holder" if has_position else "viewer",
         "style": style,
         "state": summary["state"],
