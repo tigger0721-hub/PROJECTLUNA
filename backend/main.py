@@ -180,6 +180,14 @@ def build_analysis(prices: List[Dict[str, Any]]) -> Dict[str, Any]:
         }
     )
 
+    min_separation_pct = 0.005
+
+    def _is_too_close(a: Optional[float], b: Optional[float]) -> bool:
+        if a is None or b is None:
+            return False
+        base = max(abs(a), abs(b), 1e-9)
+        return abs(a - b) / base <= min_separation_pct
+
     support = round(max(recent_20_low, ma20), 2)
     support_broken = current_price < support
     reclaim_level: Optional[float] = round(support, 2) if support_broken else None
@@ -200,18 +208,67 @@ def build_analysis(prices: List[Dict[str, Any]]) -> Dict[str, Any]:
     else:
         active_support = round(support, 2)
 
-    resistance_pool = sorted(
+    base_resistance_pool = sorted(
         {
             round(recent_20_high, 2),
             round(recent_60_high, 2),
             round(ma20, 2),
             round(ma60, 2),
             round(ma120, 2),
-            *( [reclaim_level] if reclaim_level is not None else [] ),
         }
     )
-    upside_resistance = [level for level in resistance_pool if level >= current_price * 1.005]
-    resistance = round(min(upside_resistance), 2) if upside_resistance else round(max(resistance_pool), 2)
+    resistance_pool = sorted(
+        {
+            *base_resistance_pool,
+            *([reclaim_level] if reclaim_level is not None else []),
+        }
+    )
+    upside_resistance = [level for level in base_resistance_pool if level >= current_price * 1.005]
+    original_resistance = round(min(upside_resistance), 2) if upside_resistance else round(max(base_resistance_pool), 2)
+    resistance_broken = current_price > original_resistance * 1.005
+    breakout_level: Optional[float] = round(original_resistance, 2) if resistance_broken else None
+    if resistance_broken:
+        higher_resistances = [level for level in resistance_pool if level >= current_price * 1.005]
+        fallback_resistance = round(max(current_price * 1.03, original_resistance * 1.01), 2)
+        active_resistance = round(min(higher_resistances), 2) if higher_resistances else fallback_resistance
+    else:
+        active_resistance = round(original_resistance, 2)
+
+    lower_support_candidates = sorted(
+        {
+            level
+            for level in lower_support_pool
+            if level <= current_price * 0.995 and (reclaim_level is None or level < reclaim_level)
+        },
+        reverse=True,
+    )
+
+    if support_broken and _is_too_close(active_support, reclaim_level):
+        next_support = next((lvl for lvl in lower_support_candidates if not _is_too_close(lvl, reclaim_level)), None)
+        if next_support is not None:
+            active_support = round(next_support, 2)
+
+    if support_broken and reclaim_level is not None and _is_too_close(active_resistance, reclaim_level):
+        active_resistance = round(reclaim_level, 2)
+
+    if _is_too_close(active_support, active_resistance):
+        next_support = next((lvl for lvl in lower_support_candidates if not _is_too_close(lvl, active_resistance)), None)
+        if next_support is not None:
+            active_support = round(next_support, 2)
+        else:
+            higher_resistance_candidates = sorted(
+                {level for level in resistance_pool if level >= max(current_price * 1.005, active_resistance * 1.005)}
+            )
+            next_resistance = next(
+                (lvl for lvl in higher_resistance_candidates if not _is_too_close(lvl, active_support)),
+                None,
+            )
+            if next_resistance is not None:
+                active_resistance = round(next_resistance, 2)
+            else:
+                active_resistance = round(max(active_resistance, current_price * 1.03), 2)
+
+    resistance = round(active_resistance, 2)
 
     above_ma20 = current_price > ma20
     above_ma60 = current_price > ma60
@@ -300,6 +357,10 @@ def build_analysis(prices: List[Dict[str, Any]]) -> Dict[str, Any]:
             "reclaimLevel": reclaim_level,
             "supportRole": "reclaim_resistance" if support_broken else "active_support",
             "resistance": resistance,
+            "resistanceBroken": resistance_broken,
+            "activeResistance": active_resistance,
+            "breakoutLevel": breakout_level,
+            "resistanceRole": "breakout_support" if resistance_broken else "active_resistance",
             "state": state,
             "volumeRatio": round(volume_ratio, 2),
             "rangeHigh20": round(recent_20_high, 2),
@@ -325,7 +386,7 @@ def build_analysis(prices: List[Dict[str, Any]]) -> Dict[str, Any]:
 def build_state_hint(summary: Dict[str, Any], has_position: bool, avg_price: Optional[float], style: str) -> str:
     current = summary["currentPrice"]
     support = summary.get("activeSupport", summary["support"])
-    resistance = summary["resistance"]
+    resistance = summary.get("activeResistance", summary["resistance"])
     state = summary["state"]
     ma20 = summary["ma20"]
     trend_state = summary.get("trendState")
@@ -499,6 +560,9 @@ def _fallback_ai_opinion(summary: Dict[str, Any]) -> Dict[str, str]:
     support_broken = bool(summary.get("supportBroken"))
     active_support = summary.get("activeSupport", summary.get("support"))
     reclaim_level = summary.get("reclaimLevel")
+    resistance_broken = bool(summary.get("resistanceBroken"))
+    active_resistance = summary.get("activeResistance", summary.get("resistance"))
+    breakout_level = summary.get("breakoutLevel")
 
     if trend_state == "sharp_drop":
         if support_broken and reclaim_level is not None:
@@ -523,14 +587,23 @@ def _fallback_ai_opinion(summary: Dict[str, Any]) -> Dict[str, str]:
             "summary": "기존 지지는 이미 깨져서 지금은 회복 여부를 먼저 봐야 해.",
             "commentary": (
                 f"{reclaim_level}은 원래 지지였지만 지금은 되돌림 저항에 가까워서 회복 전엔 공격적으로 보기 어려워. "
-                f"아래에선 {active_support}이 다음 지지 후보라 그 자리 반응이 확인될 때까지 분할 대응이 좋아. "
+                f"아래에선 {active_support}이 다음 지지 후보고, 위쪽에서 실제로 막히는 자리는 {active_resistance} 쪽이야. "
                 "급하게 추격하지 말고 회복 캔들이랑 거래량 붙는지부터 같이 보자."
+            ),
+        }
+    if resistance_broken and breakout_level is not None:
+        return {
+            "summary": "기존 저항은 이미 돌파해서 이제는 눌림 지지 확인이 더 중요해.",
+            "commentary": (
+                f"{breakout_level}은 원래 저항이었는데 이미 돌파한 자리라 눌릴 때 지지로 버티는지 보는 게 핵심이야. "
+                f"위쪽에서 새로 막힐 수 있는 자리는 {active_resistance} 근처라 그 전까지는 추세 유지 쪽으로 볼 수 있어. "
+                f"다만 {breakout_level} 재이탈이 나오면 돌파 실패가 될 수 있으니 대응 기준은 미리 잡아두자."
             ),
         }
     return {
         "summary": "지금은 급하게 판단하기보다 기준 자리 확인이 먼저야.",
         "commentary": (
-            f"지금 가격은 {summary['currentPrice']} 근처고, 핵심은 {active_support} 지지랑 {summary['resistance']} 저항 반응이야. "
+            f"지금 가격은 {summary['currentPrice']} 근처고, 핵심은 {active_support} 지지랑 {active_resistance} 저항 반응이야. "
             f"거래량이 평균 대비 {summary['volumeRatio']}배라서 힘이 확 붙는 자리는 아직 더 확인해보는 게 좋아 보여. "
             "보유 중이면 지지 깨지는지만 먼저 보고, 미보유면 눌림이나 안착이 나오는지 같이 보자."
         ),
@@ -653,6 +726,9 @@ def _build_system_prompt(has_position: bool, style: str) -> str:
         "행동과 이유를 멀리 떼어놓지 말고, 이유는 지지/저항·거래량·추세·손절 기준 같은 차트 근거로 써. "
         "입력의 supportBroken이 true면 broken support를 현재 지지처럼 말하지 말고, reclaimLevel을 회복해야 하는 되돌림 저항으로 해석해. "
         "supportBroken이 true일 땐 activeSupport를 현재 유효 지지로 쓰고, supportBroken이 false일 때만 support를 일반 지지처럼 써. "
+        "입력의 resistanceBroken이 true면 breakoutLevel은 이미 돌파된 자리로 보고, 현재 저항처럼 부르지 마. "
+        "resistanceBroken이 true일 땐 breakoutLevel을 눌림 지지/리테스트 기준으로 해석하고, 위쪽 저항은 activeResistance로 설명해. "
+        "resistanceBroken이 false일 때만 resistance 또는 activeResistance를 현재 상단 저항으로 써. "
         "입력의 trendState가 sharp_drop이면 방어를 최우선으로 보고, 지지 근처라는 이유만으로 매수 제안을 하지 마. "
         "sharp_drop에서는 반등 확인, 지지 안정, 거래량 회복 같은 확인 신호가 있을 때만 진입을 제한적으로 허용해. "
         "sharp_drop + holder면 손절/비중축소 같은 자금보호 기준을 먼저 제시하고, sharp_drop + viewer면 기본값을 관망으로 둬. "
@@ -698,6 +774,10 @@ def generate_ai_opinion(
         "reclaimLevel": summary.get("reclaimLevel"),
         "supportRole": summary.get("supportRole", "active_support"),
         "resistance": summary["resistance"],
+        "resistanceBroken": summary.get("resistanceBroken", False),
+        "activeResistance": summary.get("activeResistance", summary["resistance"]),
+        "breakoutLevel": summary.get("breakoutLevel"),
+        "resistanceRole": summary.get("resistanceRole", "active_resistance"),
         "addBuyZone": personalization["suggestedAddBuyZone"],
         "stopLine": personalization["suggestedStop"],
         "takeProfit": personalization["suggestedTakeProfit"],
