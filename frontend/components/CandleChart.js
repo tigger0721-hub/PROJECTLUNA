@@ -1,12 +1,29 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { createChart } from "lightweight-charts";
 import { formatNumber, formatVolume } from "@/utils/formatPrice";
 
 export default function CandleChart({ chartData, support, resistance, country }) {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
+
+  const latestVolume = useMemo(() => {
+    const volumeData = chartData?.volume || [];
+    if (!volumeData.length) return null;
+
+    for (let i = volumeData.length - 1; i >= 0; i -= 1) {
+      const value = volumeData[i]?.value;
+      if (value !== null && value !== undefined) return value;
+    }
+
+    return null;
+  }, [chartData]);
+
+  const latestVolumeLabel =
+    latestVolume === null
+      ? null
+      : `${country === "KR" ? "거래량" : "Vol"} ${formatVolume(latestVolume, country)}`;
 
   useEffect(() => {
     if (!containerRef.current || !chartData) return;
@@ -102,6 +119,8 @@ export default function CandleChart({ chartData, support, resistance, country })
         formatter: (value) => formatVolume(value, country)
       },
       priceScaleId: "",
+      priceLineVisible: false,
+      lastValueVisible: false,
       scaleMargins: {
         top: 0.78,
         bottom: 0
@@ -166,5 +185,28 @@ export default function CandleChart({ chartData, support, resistance, country })
     };
   }, [chartData, country, support, resistance]);
 
-  return <div ref={containerRef} style={{ width: "100%", minHeight: 460 }} />;
+  return (
+    <div style={{ position: "relative", width: "100%", minHeight: 460 }}>
+      <div ref={containerRef} style={{ width: "100%", minHeight: 460 }} />
+      {latestVolumeLabel && (
+        <div
+          style={{
+            position: "absolute",
+            right: 12,
+            bottom: 12,
+            fontSize: 12,
+            lineHeight: 1.2,
+            color: "#cbd5e1",
+            background: "rgba(15, 23, 42, 0.9)",
+            border: "1px solid rgba(71, 85, 105, 0.7)",
+            borderRadius: 6,
+            padding: "4px 8px",
+            pointerEvents: "none"
+          }}
+        >
+          {latestVolumeLabel}
+        </div>
+      )}
+    </div>
+  );
 }
