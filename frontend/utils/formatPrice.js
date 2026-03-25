@@ -27,6 +27,38 @@ export function formatPrice(value, country) {
   return `${numberText}원`;
 }
 
+export function formatVolume(value, country) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return country === "US" ? "Vol -" : "거래량 -";
+
+  if (country === "US") {
+    const absNumber = Math.abs(number);
+
+    if (absNumber >= 1_000_000_000) {
+      return `Vol ${(number / 1_000_000_000).toFixed(1)}B`;
+    }
+
+    if (absNumber >= 1_000_000) {
+      return `Vol ${(number / 1_000_000).toFixed(1)}M`;
+    }
+
+    if (absNumber >= 1_000) {
+      return `Vol ${(number / 1_000).toFixed(1)}K`;
+    }
+
+    return `Vol ${Math.round(number).toLocaleString("en-US")}`;
+  }
+
+  const manUnit = 10_000;
+  const absNumber = Math.abs(number);
+
+  if (absNumber >= manUnit) {
+    return `거래량 ${Math.round(number / manUnit).toLocaleString("ko-KR")}만`;
+  }
+
+  return `거래량 ${Math.round(number).toLocaleString("ko-KR")}`;
+}
+
 function looksLikePrice(text, index, rawNumber) {
   const before = text.slice(Math.max(0, index - 8), index);
   const after = text.slice(index + rawNumber.length, index + rawNumber.length + 8);
