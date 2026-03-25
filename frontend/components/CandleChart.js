@@ -2,13 +2,17 @@
 
 import { useEffect, useRef } from "react";
 import { createChart } from "lightweight-charts";
+import { formatNumber } from "@/utils/formatPrice";
 
-export default function CandleChart({ chartData, support, resistance }) {
+export default function CandleChart({ chartData, support, resistance, country }) {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
 
   useEffect(() => {
     if (!containerRef.current || !chartData) return;
+
+    const precision = country === "US" ? 2 : 0;
+    const minMove = country === "US" ? 0.01 : 1;
 
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
@@ -37,12 +41,20 @@ export default function CandleChart({ chartData, support, resistance }) {
       },
       crosshair: {
         mode: 1
+      },
+      localization: {
+        priceFormatter: (price) => formatNumber(price, country)
       }
     });
 
     chartRef.current = chart;
 
     const candleSeries = chart.addCandlestickSeries({
+      priceFormat: {
+        type: "price",
+        precision,
+        minMove
+      },
       upColor: "#22c55e",
       downColor: "#ef4444",
       borderVisible: false,
@@ -52,18 +64,33 @@ export default function CandleChart({ chartData, support, resistance }) {
     });
 
     const ma5Series = chart.addLineSeries({
+      priceFormat: {
+        type: "price",
+        precision,
+        minMove
+      },
       color: "#f59e0b",
       lineWidth: 2,
       priceLineVisible: false
     });
 
     const ma20Series = chart.addLineSeries({
+      priceFormat: {
+        type: "price",
+        precision,
+        minMove
+      },
       color: "#60a5fa",
       lineWidth: 2,
       priceLineVisible: false
     });
 
     const ma60Series = chart.addLineSeries({
+      priceFormat: {
+        type: "price",
+        precision,
+        minMove
+      },
       color: "#a78bfa",
       lineWidth: 2,
       priceLineVisible: false
@@ -134,7 +161,7 @@ export default function CandleChart({ chartData, support, resistance }) {
       chart.remove();
       chartRef.current = null;
     };
-  }, [chartData, support, resistance]);
+  }, [chartData, country, support, resistance]);
 
   return <div ref={containerRef} style={{ width: "100%", minHeight: 460 }} />;
 }
