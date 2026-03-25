@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 import json
 import logging
 import os
 import re
 import time
 import unicodedata
+from datetime import date, timedelta
 from io import StringIO
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -28,6 +31,7 @@ app.add_middleware(
 
 STOOQ_URL = "https://stooq.com/q/d/l/"
 YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/"
+NAVER_KR_CHART_URL = "https://fchart.stock.naver.com/siseJson.nhn"
 logger = logging.getLogger(__name__)
 
 STYLE_GUIDE = {
@@ -62,7 +66,7 @@ def normalize_ticker(ticker: str) -> str:
     return ticker.strip().lower()
 
 
-INSTRUMENT_CATALOG: List[Dict[str, str]] = [
+US_INSTRUMENT_CATALOG: List[Dict[str, str]] = [
     {
         "symbol": "NVDA",
         "name_ko": "엔비디아",
@@ -103,47 +107,9 @@ INSTRUMENT_CATALOG: List[Dict[str, str]] = [
         "provider_symbol": "msft.us",
         "aliases": "microsoft,마이크로소프트,msft",
     },
-    {
-        "symbol": "005930",
-        "name_ko": "삼성전자",
-        "name_en": "Samsung Electronics",
-        "market": "KRX_KOSPI",
-        "country": "KR",
-        "provider": "yahoo",
-        "provider_symbol": "005930.KS",
-        "aliases": "삼성전자,samsung,samsung electronics,005930",
-    },
-    {
-        "symbol": "000660",
-        "name_ko": "SK하이닉스",
-        "name_en": "SK hynix",
-        "market": "KRX_KOSPI",
-        "country": "KR",
-        "provider": "yahoo",
-        "provider_symbol": "000660.KS",
-        "aliases": "sk hynix,sk하이닉스,000660",
-    },
-    {
-        "symbol": "035420",
-        "name_ko": "NAVER",
-        "name_en": "NAVER",
-        "market": "KRX_KOSPI",
-        "country": "KR",
-        "provider": "yahoo",
-        "provider_symbol": "035420.KS",
-        "aliases": "naver,네이버,035420",
-    },
-    {
-        "symbol": "196170",
-        "name_ko": "알테오젠",
-        "name_en": "Alteogen",
-        "market": "KRX_KOSDAQ",
-        "country": "KR",
-        "provider": "yahoo",
-        "provider_symbol": "196170.KQ",
-        "aliases": "알테오젠,alteogen,196170",
-    },
 ]
+
+KR_INSTRUMENT_FILE = Path(__file__).resolve().parent / "data" / "kr_instruments.json"
 
 
 def _normalize_query_text(query: str) -> str:
@@ -151,9 +117,46 @@ def _normalize_query_text(query: str) -> str:
     return re.sub(r"\s+", " ", normalized)
 
 
-def _build_catalog_index() -> Dict[str, Dict[str, str]]:
+def _load_kr_instrument_catalog() -> List[Dict[str, str]]:
+    try:
+        with KR_INSTRUMENT_FILE.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception as e:
+        logger.warning("Failed to load KR instrument file %s: %s", KR_INSTRUMENT_FILE, e)
+        return []
+    if not isinstance(payload, list):
+        logger.warning("KR instrument file has invalid shape: expected list")
+        return []
+    catalog: List[Dict[str, str]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("symbol", "")).strip()
+        name_ko = str(item.get("name_ko", "")).strip()
+        if not symbol or not name_ko:
+            continue
+        catalog.append(
+            {
+                "symbol": symbol.zfill(6),
+                "name_ko": name_ko,
+                "name_en": str(item.get("name_en", "")).strip(),
+                "market": str(item.get("market", "KRX")).strip() or "KRX",
+                "country": "KR",
+                "provider": "naver",
+                "provider_symbol": symbol.zfill(6),
+                "aliases": str(item.get("aliases", "")).strip(),
+            }
+        )
+    return catalog
+
+
+KR_INSTRUMENT_CATALOG = _load_kr_instrument_catalog()
+INSTRUMENT_CATALOG = [*US_INSTRUMENT_CATALOG, *KR_INSTRUMENT_CATALOG]
+
+
+def _build_catalog_index(catalog: List[Dict[str, str]]) -> Dict[str, Dict[str, str]]:
     index: Dict[str, Dict[str, str]] = {}
-    for instrument in INSTRUMENT_CATALOG:
+    for instrument in catalog:
         tokens = {
             instrument["symbol"].lower(),
             instrument["name_ko"].lower(),
@@ -165,7 +168,7 @@ def _build_catalog_index() -> Dict[str, Dict[str, str]]:
     return index
 
 
-INSTRUMENT_INDEX = _build_catalog_index()
+INSTRUMENT_INDEX = _build_catalog_index(INSTRUMENT_CATALOG)
 
 
 def _resolve_us_instrument(query: str) -> Dict[str, str]:
@@ -193,7 +196,7 @@ def _resolve_kr_instrument_from_code(code: str) -> Dict[str, str]:
             "display_name": catalog_hit["name_ko"],
             "market": catalog_hit["market"],
             "country": "KR",
-            "provider": "yahoo",
+            "provider": "naver",
             "provider_symbol": catalog_hit["provider_symbol"],
             "query": code,
         }
@@ -202,8 +205,8 @@ def _resolve_kr_instrument_from_code(code: str) -> Dict[str, str]:
         "display_name": normalized_code,
         "market": "KRX",
         "country": "KR",
-        "provider": "yahoo",
-        "provider_symbol": f"{normalized_code}.KS",
+        "provider": "naver",
+        "provider_symbol": normalized_code,
         "query": code,
     }
 
@@ -227,6 +230,9 @@ def resolve_instrument(query: str) -> Dict[str, str]:
 
     if re.fullmatch(r"\d{5,6}", normalized):
         return _resolve_kr_instrument_from_code(normalized)
+
+    if re.search(r"[가-힣]", normalized):
+        raise ValueError("입력한 국내 종목을 찾지 못했어. 종목명이나 종목코드를 다시 확인해줘.")
 
     return _resolve_us_instrument(normalized)
 
@@ -322,9 +328,81 @@ async def fetch_yahoo_daily_prices(provider_symbol: str) -> List[Dict[str, Any]]
     return prices[-240:]
 
 
+def _parse_naver_chart_rows(raw_text: str) -> List[List[Any]]:
+    text = raw_text.strip()
+    if not text:
+        return []
+    try:
+        parsed = ast.literal_eval(text)
+    except Exception:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+async def fetch_kr_daily_prices_from_naver(provider_symbol: str) -> List[Dict[str, Any]]:
+    code = provider_symbol.strip().zfill(6)
+    today = date.today()
+    start_day = today - timedelta(days=900)
+    params = {
+        "symbol": code,
+        "requestType": "1",
+        "startTime": start_day.strftime("%Y%m%d"),
+        "endTime": today.strftime("%Y%m%d"),
+        "timeframe": "day",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            response = await client.get(
+                NAVER_KR_CHART_URL,
+                params=params,
+                headers={"User-Agent": "Mozilla/5.0 (ProjectLuna KR Fetcher)"},
+            )
+            response.raise_for_status()
+        rows = _parse_naver_chart_rows(response.text)
+    except Exception as e:
+        logger.warning("KR price fetch failed for %s: %s", code, e)
+        raise ValueError("국내 종목 시세를 불러오지 못했어. 잠시 후 다시 시도해줘.")
+
+    if len(rows) <= 1:
+        raise ValueError("입력한 국내 종목을 찾지 못했어. 종목명이나 종목코드를 다시 확인해줘.")
+
+    prices: List[Dict[str, Any]] = []
+    for row in rows[1:]:
+        if not isinstance(row, list) or len(row) < 6:
+            continue
+        try:
+            day = str(row[0])
+            o = float(row[1])
+            h = float(row[2])
+            l = float(row[3])
+            c = float(row[4])
+            v = float(row[5])
+            if not day or any(value <= 0 for value in [o, h, l, c]):
+                continue
+        except Exception:
+            continue
+
+        prices.append(
+            {
+                "time": pd.to_datetime(day, format="%Y%m%d").strftime("%Y-%m-%d"),
+                "open": o,
+                "high": h,
+                "low": l,
+                "close": c,
+                "volume": v,
+            }
+        )
+
+    if len(prices) < 120:
+        raise ValueError("분석 가능한 기간의 시세를 찾지 못했어. 다른 종목명/코드로 다시 입력해줘.")
+    return prices[-240:]
+
+
 async def fetch_prices_for_instrument(instrument: Dict[str, str]) -> List[Dict[str, Any]]:
     provider = instrument["provider"]
     provider_symbol = instrument["provider_symbol"]
+    if provider == "naver":
+        return await fetch_kr_daily_prices_from_naver(provider_symbol)
     if provider == "yahoo":
         return await fetch_yahoo_daily_prices(provider_symbol)
     try:
