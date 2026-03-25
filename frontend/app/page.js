@@ -63,18 +63,18 @@ export default function HomePage() {
         <div style={{ marginBottom: 24 }}>
           <h1 style={{ fontSize: 42, lineHeight: 1.15, margin: 0 }}>루나 차트 해설 MVP</h1>
           <p style={{ color: "#475569", fontSize: 18, marginTop: 12, lineHeight: 1.7 }}>
-            티커와 보유 여부를 기준으로 루나가 차트와 함께 개인화된 분석을 보여줘.
+            미국/국내 종목명 또는 티커·코드를 입력하면 루나가 차트와 함께 개인화된 분석을 보여줘.
           </p>
         </div>
 
         <form action="/result" method="get" style={cardStyle}>
           <div style={{ display: "grid", gap: 16 }}>
             <div>
-              <label style={labelStyle}>티커</label>
+              <label style={labelStyle}>종목 검색</label>
               <input
                 name="ticker"
-                defaultValue="AAPL.US"
-                placeholder="예: AAPL.US"
+                defaultValue="NVDA"
+                placeholder="종목명 또는 티커 입력 (예: 엔비디아, NVDA, 삼성전자, 005930)"
                 style={inputStyle}
                 required
               />
@@ -135,7 +135,7 @@ export default function HomePage() {
             </div>
 
             <div style={{ color: "#64748b", fontSize: 13 }}>
-              예시: AAPL.US / TSLA.US / NVDA.US
+              예시: 엔비디아 / Nvidia / TSLA / 삼성전자 / 005930 / 알테오젠
             </div>
           </div>
         </form>

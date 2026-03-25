@@ -4,7 +4,9 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
+import unicodedata
 from io import StringIO
 from typing import Any, Dict, List, Optional
 
@@ -25,6 +27,7 @@ app.add_middleware(
 )
 
 STOOQ_URL = "https://stooq.com/q/d/l/"
+YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/"
 logger = logging.getLogger(__name__)
 
 STYLE_GUIDE = {
@@ -57,6 +60,175 @@ STYLE_GUIDE = {
 
 def normalize_ticker(ticker: str) -> str:
     return ticker.strip().lower()
+
+
+INSTRUMENT_CATALOG: List[Dict[str, str]] = [
+    {
+        "symbol": "NVDA",
+        "name_ko": "엔비디아",
+        "name_en": "NVIDIA",
+        "market": "US",
+        "country": "US",
+        "provider": "stooq",
+        "provider_symbol": "nvda.us",
+        "aliases": "nvidia,엔비디아,nvda",
+    },
+    {
+        "symbol": "TSLA",
+        "name_ko": "테슬라",
+        "name_en": "Tesla",
+        "market": "US",
+        "country": "US",
+        "provider": "stooq",
+        "provider_symbol": "tsla.us",
+        "aliases": "tesla,테슬라,tsla",
+    },
+    {
+        "symbol": "AAPL",
+        "name_ko": "애플",
+        "name_en": "Apple",
+        "market": "US",
+        "country": "US",
+        "provider": "stooq",
+        "provider_symbol": "aapl.us",
+        "aliases": "apple,애플,aapl",
+    },
+    {
+        "symbol": "MSFT",
+        "name_ko": "마이크로소프트",
+        "name_en": "Microsoft",
+        "market": "US",
+        "country": "US",
+        "provider": "stooq",
+        "provider_symbol": "msft.us",
+        "aliases": "microsoft,마이크로소프트,msft",
+    },
+    {
+        "symbol": "005930",
+        "name_ko": "삼성전자",
+        "name_en": "Samsung Electronics",
+        "market": "KRX_KOSPI",
+        "country": "KR",
+        "provider": "yahoo",
+        "provider_symbol": "005930.KS",
+        "aliases": "삼성전자,samsung,samsung electronics,005930",
+    },
+    {
+        "symbol": "000660",
+        "name_ko": "SK하이닉스",
+        "name_en": "SK hynix",
+        "market": "KRX_KOSPI",
+        "country": "KR",
+        "provider": "yahoo",
+        "provider_symbol": "000660.KS",
+        "aliases": "sk hynix,sk하이닉스,000660",
+    },
+    {
+        "symbol": "035420",
+        "name_ko": "NAVER",
+        "name_en": "NAVER",
+        "market": "KRX_KOSPI",
+        "country": "KR",
+        "provider": "yahoo",
+        "provider_symbol": "035420.KS",
+        "aliases": "naver,네이버,035420",
+    },
+    {
+        "symbol": "196170",
+        "name_ko": "알테오젠",
+        "name_en": "Alteogen",
+        "market": "KRX_KOSDAQ",
+        "country": "KR",
+        "provider": "yahoo",
+        "provider_symbol": "196170.KQ",
+        "aliases": "알테오젠,alteogen,196170",
+    },
+]
+
+
+def _normalize_query_text(query: str) -> str:
+    normalized = unicodedata.normalize("NFKC", query).strip().lower()
+    return re.sub(r"\s+", " ", normalized)
+
+
+def _build_catalog_index() -> Dict[str, Dict[str, str]]:
+    index: Dict[str, Dict[str, str]] = {}
+    for instrument in INSTRUMENT_CATALOG:
+        tokens = {
+            instrument["symbol"].lower(),
+            instrument["name_ko"].lower(),
+            instrument["name_en"].lower(),
+            *[token.strip().lower() for token in instrument.get("aliases", "").split(",") if token.strip()],
+        }
+        for token in tokens:
+            index[_normalize_query_text(token)] = instrument
+    return index
+
+
+INSTRUMENT_INDEX = _build_catalog_index()
+
+
+def _resolve_us_instrument(query: str) -> Dict[str, str]:
+    symbol = query.upper()
+    normalized_symbol = symbol.replace(".US", "").replace(".KS", "").replace(".KQ", "")
+    if not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,9}", normalized_symbol):
+        raise ValueError("입력한 종목을 찾지 못했어. 종목명이나 티커를 다시 확인해줘.")
+    return {
+        "symbol": normalized_symbol,
+        "display_name": normalized_symbol,
+        "market": "US",
+        "country": "US",
+        "provider": "stooq",
+        "provider_symbol": f"{normalized_symbol.lower()}.us",
+        "query": query,
+    }
+
+
+def _resolve_kr_instrument_from_code(code: str) -> Dict[str, str]:
+    normalized_code = code.zfill(6)
+    catalog_hit = INSTRUMENT_INDEX.get(normalized_code)
+    if catalog_hit:
+        return {
+            "symbol": catalog_hit["symbol"],
+            "display_name": catalog_hit["name_ko"],
+            "market": catalog_hit["market"],
+            "country": "KR",
+            "provider": "yahoo",
+            "provider_symbol": catalog_hit["provider_symbol"],
+            "query": code,
+        }
+    return {
+        "symbol": normalized_code,
+        "display_name": normalized_code,
+        "market": "KRX",
+        "country": "KR",
+        "provider": "yahoo",
+        "provider_symbol": f"{normalized_code}.KS",
+        "query": code,
+    }
+
+
+def resolve_instrument(query: str) -> Dict[str, str]:
+    normalized = _normalize_query_text(query)
+    if not normalized:
+        raise ValueError("입력한 종목을 찾지 못했어. 종목명이나 티커를 다시 확인해줘.")
+
+    catalog_hit = INSTRUMENT_INDEX.get(normalized)
+    if catalog_hit:
+        return {
+            "symbol": catalog_hit["symbol"],
+            "display_name": catalog_hit["name_ko"] or catalog_hit["name_en"],
+            "market": catalog_hit["market"],
+            "country": catalog_hit["country"],
+            "provider": catalog_hit["provider"],
+            "provider_symbol": catalog_hit["provider_symbol"],
+            "query": query,
+        }
+
+    if re.fullmatch(r"\d{5,6}", normalized):
+        return _resolve_kr_instrument_from_code(normalized)
+
+    return _resolve_us_instrument(normalized)
 
 
 async def fetch_daily_prices(ticker: str) -> List[Dict[str, Any]]:
@@ -104,6 +276,61 @@ async def fetch_daily_prices(ticker: str) -> List[Dict[str, Any]]:
         }
         for _, row in df.tail(240).iterrows()
     ]
+
+
+async def fetch_yahoo_daily_prices(provider_symbol: str) -> List[Dict[str, Any]]:
+    url = f"{YAHOO_CHART_URL}{provider_symbol}"
+    params = {"interval": "1d", "range": "18mo"}
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+        data = response.json()
+    except Exception:
+        raise ValueError("종목 시세를 불러오지 못했어. 잠시 후 다시 시도해줘.")
+    chart = data.get("chart", {})
+    if chart.get("error"):
+        raise ValueError("해당 종목 코드를 찾지 못했어.")
+    result = chart.get("result") or []
+    if not result:
+        raise ValueError("해당 종목 코드를 찾지 못했어.")
+    first = result[0]
+    timestamps = first.get("timestamp") or []
+    quote = (((first.get("indicators") or {}).get("quote")) or [{}])[0]
+    opens = quote.get("open") or []
+    highs = quote.get("high") or []
+    lows = quote.get("low") or []
+    closes = quote.get("close") or []
+    volumes = quote.get("volume") or []
+
+    prices: List[Dict[str, Any]] = []
+    for ts, o, h, l, c, v in zip(timestamps, opens, highs, lows, closes, volumes):
+        if o is None or h is None or l is None or c is None or v is None:
+            continue
+        prices.append(
+            {
+                "time": pd.to_datetime(ts, unit="s").strftime("%Y-%m-%d"),
+                "open": float(o),
+                "high": float(h),
+                "low": float(l),
+                "close": float(c),
+                "volume": float(v),
+            }
+        )
+    if len(prices) < 120:
+        raise ValueError("분석 가능한 기간의 시세를 찾지 못했어. 다른 종목명/코드로 다시 입력해줘.")
+    return prices[-240:]
+
+
+async def fetch_prices_for_instrument(instrument: Dict[str, str]) -> List[Dict[str, Any]]:
+    provider = instrument["provider"]
+    provider_symbol = instrument["provider_symbol"]
+    if provider == "yahoo":
+        return await fetch_yahoo_daily_prices(provider_symbol)
+    try:
+        return await fetch_daily_prices(provider_symbol)
+    except Exception:
+        return await fetch_yahoo_daily_prices(instrument["symbol"])
 
 
 def build_recent_trend_summary(df: pd.DataFrame) -> str:
@@ -899,7 +1126,8 @@ async def analyze(
             if avg_price is None or quantity is None:
                 raise ValueError("보유자 모드에서는 평단가와 보유수량을 입력해야 해")
 
-        prices = await fetch_daily_prices(ticker)
+        instrument = resolve_instrument(ticker)
+        prices = await fetch_prices_for_instrument(instrument)
         analysis = build_analysis(prices)
         personalization = build_personalization(
             mode=mode,
@@ -910,7 +1138,7 @@ async def analyze(
             quantity=quantity,
             style=style,
         )
-        ai_opinion = generate_ai_opinion(ticker, analysis, personalization)
+        ai_opinion = generate_ai_opinion(instrument["symbol"], analysis, personalization)
         if (
             not ai_opinion
             or not isinstance(ai_opinion, dict)
@@ -923,7 +1151,8 @@ async def analyze(
         analysis["lessons"] = []
 
         return {
-            "ticker": ticker.upper(),
+            "ticker": instrument["symbol"],
+            "instrument": instrument,
             "analysis": analysis,
             "personalization": personalization,
             "stateHint": build_state_hint(
