@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import CandleChart from "@/components/CandleChart";
+import { formatNumber, formatPrice, formatPriceText } from "@/utils/formatPrice";
 
 const pageStyle = {
   minHeight: "100vh",
@@ -292,16 +293,21 @@ function SummaryRow({ label, value }) {
   );
 }
 
-function numberOrDash(value) {
+function formatPriceOrDash(value, country) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
-  return Number(value).toLocaleString("ko-KR", { maximumFractionDigits: 2 });
+  return formatPrice(value, country);
 }
 
-function movingAverageText(summary) {
-  const ma5 = numberOrDash(summary?.ma5);
-  const ma20 = numberOrDash(summary?.ma20);
-  const ma60 = numberOrDash(summary?.ma60);
-  const ma120 = numberOrDash(summary?.ma120);
+function formatNumberOrDash(value, country) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
+  return formatNumber(value, country);
+}
+
+function movingAverageText(summary, country) {
+  const ma5 = formatPriceOrDash(summary?.ma5, country);
+  const ma20 = formatPriceOrDash(summary?.ma20, country);
+  const ma60 = formatPriceOrDash(summary?.ma60, country);
+  const ma120 = formatPriceOrDash(summary?.ma120, country);
   return `5일 ${ma5} / 20일 ${ma20} / 60일 ${ma60} / 120일 ${ma120}`;
 }
 
@@ -407,13 +413,14 @@ export default function ResultClient() {
   const analysis = result?.analysis || {};
   const personalization = result?.personalization || {};
   const summary = analysis?.summary || {};
-  const currentPrice = numberOrDash(summary?.currentPrice);
-  const support = numberOrDash(summary?.activeSupport ?? summary?.support);
-  const resistance = numberOrDash(summary?.activeResistance ?? summary?.resistance);
-  const volumeRatio = summary?.volumeRatio ? `${numberOrDash(summary?.volumeRatio)}배` : "-";
+  const country = result?.instrument?.country;
+  const currentPrice = formatPriceOrDash(summary?.currentPrice, country);
+  const support = formatPriceOrDash(summary?.activeSupport ?? summary?.support, country);
+  const resistance = formatPriceOrDash(summary?.activeResistance ?? summary?.resistance, country);
+  const volumeRatio = summary?.volumeRatio ? `${formatNumberOrDash(summary?.volumeRatio, country)}배` : "-";
   const aiOpinion = result?.aiOpinion || {};
-  const aiSummary = aiOpinion?.summary || "지금은 루나 한 줄 요약을 잠깐 못 불러왔어.";
-  const aiCommentary = aiOpinion?.commentary || "오빠, 지금은 해설을 잠깐 못 불러왔어. 다시 눌러보자.";
+  const aiSummary = formatPriceText(aiOpinion?.summary || "지금은 루나 한 줄 요약을 잠깐 못 불러왔어.", country);
+  const aiCommentary = formatPriceText(aiOpinion?.commentary || "오빠, 지금은 해설을 잠깐 못 불러왔어. 다시 눌러보자.", country);
 
   return (
     <main style={pageStyle}>
@@ -460,6 +467,7 @@ export default function ResultClient() {
             chartData={analysis.chart}
             support={summary?.activeSupport ?? summary?.support}
             resistance={summary?.activeResistance ?? summary?.resistance}
+            country={country}
           />
 
           <div
@@ -473,7 +481,7 @@ export default function ResultClient() {
             <div style={summaryCardStyle}>
               <div style={{ color: "#64748b", fontSize: 13, marginBottom: 8 }}>기술 요약</div>
               <SummaryRow label="현재가" value={currentPrice} />
-              <SummaryRow label="이평선" value={movingAverageText(summary)} />
+              <SummaryRow label="이평선" value={movingAverageText(summary, country)} />
               <SummaryRow label="지지" value={support} />
               <SummaryRow label="저항" value={resistance} />
               <SummaryRow label="거래량" value={volumeRatio} />
