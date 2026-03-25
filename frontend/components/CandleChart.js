@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { createChart } from "lightweight-charts";
-import { formatNumber } from "@/utils/formatPrice";
+import { formatNumber, formatVolume } from "@/utils/formatPrice";
 
 export default function CandleChart({ chartData, support, resistance, country }) {
   const containerRef = useRef(null);
@@ -97,7 +97,10 @@ export default function CandleChart({ chartData, support, resistance, country })
     });
 
     const volumeSeries = chart.addHistogramSeries({
-      priceFormat: { type: "volume" },
+      priceFormat: {
+        type: "custom",
+        formatter: (value) => formatVolume(value, country)
+      },
       priceScaleId: "",
       scaleMargins: {
         top: 0.78,
