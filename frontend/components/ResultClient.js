@@ -375,7 +375,15 @@ export default function ResultClient() {
     return (
       <main style={pageStyle}>
         <div style={wrapperStyle}>
-          <div style={{ ...cardStyle, border: "1px solid #7f1d1d", background: "#450a0a", marginBottom: 20 }}>
+          <div
+            style={{
+              ...cardStyle,
+              border: "1px solid #7f1d1d",
+              background: "#450a0a",
+              color: "#ffffff",
+              marginBottom: 20
+            }}
+          >
             {error}
           </div>
           <button
