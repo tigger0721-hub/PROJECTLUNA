@@ -20,10 +20,7 @@ export default function CandleChart({ chartData, support, resistance, country })
     return null;
   }, [chartData]);
 
-  const latestVolumeLabel =
-    latestVolume === null
-      ? null
-      : `${country === "KR" ? "거래량" : "Vol"} ${formatVolume(latestVolume, country)}`;
+  const latestVolumeLabel = latestVolume === null ? null : formatVolume(latestVolume, country);
 
   useEffect(() => {
     if (!containerRef.current || !chartData) return;
@@ -193,7 +190,8 @@ export default function CandleChart({ chartData, support, resistance, country })
           style={{
             position: "absolute",
             right: 12,
-            bottom: 12,
+            bottom: 34,
+            zIndex: 10,
             fontSize: 12,
             lineHeight: 1.2,
             color: "#cbd5e1",
