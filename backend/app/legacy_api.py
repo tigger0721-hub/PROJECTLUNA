@@ -8,7 +8,7 @@ import os
 import re
 import time
 import unicodedata
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -33,6 +33,7 @@ STOOQ_URL = "https://stooq.com/q/d/l/"
 YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/"
 NAVER_KR_CHART_URL = "https://fchart.stock.naver.com/siseJson.nhn"
 logger = logging.getLogger(__name__)
+REALTIME_QUOTE_MAX_AGE_SECONDS = 5.0
 
 STYLE_GUIDE = {
     "conservative": {
@@ -440,6 +441,161 @@ def classify_trend_state(change_percent: float, recent_move_percent_5: float, da
     return "normal"
 
 
+def _parse_timestamp_to_epoch_seconds(raw_value: Any) -> Optional[float]:
+    if raw_value is None:
+        return None
+
+    if isinstance(raw_value, datetime):
+        if raw_value.tzinfo is None:
+            return raw_value.replace(tzinfo=timezone.utc).timestamp()
+        return raw_value.timestamp()
+
+    if isinstance(raw_value, (int, float)):
+        value = float(raw_value)
+        if value > 1_000_000_000_000:
+            return value / 1000.0
+        return value
+
+    if isinstance(raw_value, str):
+        text = raw_value.strip()
+        if not text:
+            return None
+        try:
+            return _parse_timestamp_to_epoch_seconds(float(text))
+        except ValueError:
+            pass
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
+    return None
+
+
+def _format_epoch_seconds(raw_seconds: Optional[float]) -> Optional[str]:
+    if raw_seconds is None:
+        return None
+    return datetime.fromtimestamp(raw_seconds, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def select_realtime_quote(
+    symbol: str,
+    *,
+    quote_cache: Optional[Dict[str, Any]] = None,
+    now_ts: Optional[float] = None,
+    max_age_seconds: float = REALTIME_QUOTE_MAX_AGE_SECONDS,
+) -> Dict[str, Any]:
+    metadata = {
+        "quote": None,
+        "currentPriceSource": "historical_fallback",
+        "currentPriceTimestamp": None,
+        "realtimeApplied": False,
+        "realtimeStale": False,
+    }
+
+    if quote_cache is None:
+        cache_candidates = (
+            getattr(app.state, "kis_realtime_quotes", None),
+            getattr(app.state, "realtime_quote_cache", None),
+            getattr(app.state, "quote_cache", None),
+        )
+        quote_cache = next((candidate for candidate in cache_candidates if isinstance(candidate, dict)), None)
+
+    if not quote_cache:
+        return metadata
+
+    raw_entry = quote_cache.get(symbol) or quote_cache.get(symbol.upper()) or quote_cache.get(symbol.lower())
+    if not isinstance(raw_entry, dict):
+        return metadata
+
+    price_raw = raw_entry.get("price", raw_entry.get("currentPrice", raw_entry.get("lastPrice")))
+    try:
+        price_value = float(price_raw)
+    except (TypeError, ValueError):
+        return metadata
+
+    if price_value <= 0:
+        return metadata
+
+    received_ts = _parse_timestamp_to_epoch_seconds(
+        raw_entry.get("received_at", raw_entry.get("receivedAt", raw_entry.get("timestamp")))
+    )
+    if received_ts is None:
+        return metadata
+
+    current_now_ts = float(now_ts if now_ts is not None else time.time())
+    quote_age_seconds = current_now_ts - received_ts
+    metadata["currentPriceTimestamp"] = _format_epoch_seconds(received_ts)
+
+    if quote_age_seconds > max_age_seconds:
+        metadata["realtimeStale"] = True
+        return metadata
+
+    metadata["quote"] = {
+        "price": price_value,
+        "timestamp": received_ts,
+    }
+    metadata["currentPriceSource"] = "kis_realtime"
+    metadata["realtimeApplied"] = True
+    return metadata
+
+
+def recalculate_summary_for_current_price(summary: Dict[str, Any], current_price: float) -> Dict[str, Any]:
+    next_summary = dict(summary)
+    prior_current_price = float(next_summary.get("currentPrice", current_price) or current_price)
+    prev_close = float(next_summary.get("prevClose", prior_current_price) or prior_current_price)
+
+    next_summary["currentPrice"] = round(float(current_price), 2)
+    next_summary["prevClose"] = round(prev_close, 2)
+
+    if prev_close:
+        next_summary["changePercent"] = round(((float(current_price) - prev_close) / prev_close) * 100, 2)
+
+    day_high = next_summary.get("dayHigh")
+    day_low = next_summary.get("dayLow")
+    if day_high is not None and day_low is not None and float(current_price):
+        next_summary["dailyRangePercent"] = round(((float(day_high) - float(day_low)) / float(current_price)) * 100, 2)
+    elif next_summary.get("dailyRangePercent") is not None and prior_current_price:
+        spread_amount = (float(next_summary["dailyRangePercent"]) / 100.0) * prior_current_price
+        next_summary["dailyRangePercent"] = round((spread_amount / float(current_price)) * 100, 2) if float(current_price) else 0.0
+
+    recent_move_percent_5 = next_summary.get("recentMovePercent5")
+    if recent_move_percent_5 is not None:
+        denominator = 1 + (float(recent_move_percent_5) / 100.0)
+        if denominator:
+            recent_5_close = prior_current_price / denominator
+            if recent_5_close:
+                next_summary["recentMovePercent5"] = round(((float(current_price) - recent_5_close) / recent_5_close) * 100, 2)
+
+    ma20 = next_summary.get("ma20")
+    ma20_gap_percent = ((float(current_price) - float(ma20)) / float(ma20) * 100) if ma20 else 0.0
+    if (
+        next_summary.get("changePercent") is not None
+        and next_summary.get("recentMovePercent5") is not None
+        and next_summary.get("dailyRangePercent") is not None
+    ):
+        next_summary["trendState"] = classify_trend_state(
+            float(next_summary["changePercent"]),
+            float(next_summary["recentMovePercent5"]),
+            float(next_summary["dailyRangePercent"]),
+            ma20_gap_percent,
+        )
+
+    support = next_summary.get("support")
+    resistance = next_summary.get("resistance")
+    if support is not None:
+        support_broken = float(current_price) < float(support)
+        next_summary["supportBroken"] = support_broken
+        next_summary["reclaimLevel"] = round(float(support), 2) if support_broken else None
+        next_summary["supportRole"] = "reclaim_resistance" if support_broken else "active_support"
+    if resistance is not None:
+        resistance_broken = float(current_price) > float(resistance) * 1.005
+        next_summary["resistanceBroken"] = resistance_broken
+        next_summary["breakoutLevel"] = round(float(resistance), 2) if resistance_broken else None
+        next_summary["resistanceRole"] = "breakout_support" if resistance_broken else "active_resistance"
+
+    return next_summary
+
+
 def build_analysis(prices: List[Dict[str, Any]]) -> Dict[str, Any]:
     if len(prices) < 120:
         raise ValueError("분석하려면 최소 120일 정도 데이터가 필요해")
@@ -649,6 +805,8 @@ def build_analysis(prices: List[Dict[str, Any]]) -> Dict[str, Any]:
             "currentPrice": round(current_price, 2),
             "prevClose": round(prev_close, 2),
             "changePercent": round(change_percent, 2),
+            "dayHigh": round(float(latest["high"]), 2),
+            "dayLow": round(float(latest["low"]), 2),
             "dailyRangePercent": round(daily_range_percent, 2),
             "recentMovePercent5": round(recent_move_percent_5, 2),
             "trendState": trend_state,
@@ -1207,6 +1365,18 @@ async def analyze(
         instrument = resolve_instrument(ticker)
         prices = await fetch_prices_for_instrument(instrument)
         analysis = build_analysis(prices)
+        realtime_meta = select_realtime_quote(instrument["symbol"])
+        realtime_quote = realtime_meta.get("quote")
+        if realtime_quote:
+            analysis["summary"] = recalculate_summary_for_current_price(
+                analysis["summary"],
+                float(realtime_quote["price"]),
+            )
+        analysis["summary"]["currentPriceSource"] = realtime_meta["currentPriceSource"]
+        analysis["summary"]["currentPriceTimestamp"] = realtime_meta["currentPriceTimestamp"]
+        analysis["summary"]["realtimeApplied"] = realtime_meta["realtimeApplied"]
+        analysis["summary"]["realtimeStale"] = realtime_meta["realtimeStale"]
+
         personalization = build_personalization(
             mode=mode,
             current_price=analysis["summary"]["currentPrice"],
