@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -10,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.legacy_api import app
 from app.legacy_api import recalculate_summary_for_current_price, select_realtime_quote
+from app.legacy_api import fetch_prices_for_instrument, resolve_instrument
 
 
 def _iso_seconds_ago(seconds_ago: int) -> str:
@@ -108,3 +110,65 @@ def test_analyze_response_includes_realtime_flags_for_fallback(monkeypatch) -> N
     assert summary["currentPriceSource"] == "historical_fallback"
     assert summary["realtimeApplied"] is False
     assert summary["realtimeStale"] is False
+
+
+def test_resolve_us_instrument_uses_kis_provider() -> None:
+    instrument = resolve_instrument("NVDA")
+    assert instrument["country"] == "US"
+    assert instrument["provider"] == "kis"
+    assert instrument["provider_symbol"] == "NVDA"
+
+
+def test_fetch_prices_for_us_instrument_prefers_kis(monkeypatch) -> None:
+    async def fake_fetch_us(provider_symbol):
+        assert provider_symbol == "NVDA"
+        return [{"time": "2026-03-31", "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}] * 130
+
+    monkeypatch.setattr("app.legacy_api.fetch_us_daily_prices_from_kis", fake_fetch_us)
+
+    prices = asyncio.run(
+        fetch_prices_for_instrument(
+            {"symbol": "NVDA", "country": "US", "provider": "kis", "provider_symbol": "NVDA", "market": "US"}
+        )
+    )
+    assert len(prices) == 130
+
+
+def test_analyze_returns_200_for_target_tickers_with_kis_path(monkeypatch) -> None:
+    async def fake_fetch_prices(instrument):
+        return [{"time": "2026-03-26", "open": 100, "high": 102, "low": 98, "close": 101, "volume": 1000}] * 130
+
+    def fake_build_analysis(_prices):
+        return {
+            "summary": {
+                "currentPrice": 101.0,
+                "prevClose": 100.0,
+                "changePercent": 1.0,
+                "dayHigh": 102.0,
+                "dayLow": 98.0,
+                "dailyRangePercent": 3.96,
+                "recentMovePercent5": 2.0,
+                "ma20": 99.0,
+                "support": 95.0,
+                "resistance": 110.0,
+                "activeSupport": 95.0,
+                "activeResistance": 110.0,
+                "state": "박스권",
+                "trendState": "normal",
+                "volumeRatio": 1.0,
+            },
+            "trendSummary": "ok",
+            "volumeSummary": "ok",
+            "supportCandidates": [],
+            "resistanceCandidates": [],
+            "chart": {"candles": [], "ma5": [], "ma20": [], "ma60": [], "ma120": [], "volume": []},
+        }
+
+    monkeypatch.setattr("app.legacy_api.fetch_prices_for_instrument", fake_fetch_prices)
+    monkeypatch.setattr("app.legacy_api.build_analysis", fake_build_analysis)
+    monkeypatch.setattr("app.legacy_api.generate_ai_opinion", lambda *_args, **_kwargs: {"summary": "s", "commentary": "c"})
+
+    client = TestClient(app)
+    for ticker in ("NVDA", "CRCL", "005930"):
+        response = client.get("/api/analyze", params={"ticker": ticker, "mode": "viewer", "style": "conservative"})
+        assert response.status_code == 200
