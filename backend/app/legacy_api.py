@@ -32,8 +32,10 @@ app.add_middleware(
 STOOQ_URL = "https://stooq.com/q/d/l/"
 YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/"
 NAVER_KR_CHART_URL = "https://fchart.stock.naver.com/siseJson.nhn"
+KIS_BASE_URL = os.getenv("KIS_BASE_URL", "https://openapi.koreainvestment.com:9443").rstrip("/")
 logger = logging.getLogger(__name__)
 REALTIME_QUOTE_MAX_AGE_SECONDS = 5.0
+_KIS_TOKEN_CACHE: Dict[str, Any] = {"access_token": None, "expires_at": 0.0}
 
 STYLE_GUIDE = {
     "conservative": {
@@ -74,8 +76,8 @@ US_INSTRUMENT_CATALOG: List[Dict[str, str]] = [
         "name_en": "NVIDIA",
         "market": "US",
         "country": "US",
-        "provider": "stooq",
-        "provider_symbol": "nvda.us",
+        "provider": "kis",
+        "provider_symbol": "NVDA",
         "aliases": "nvidia,엔비디아,nvda",
     },
     {
@@ -84,8 +86,8 @@ US_INSTRUMENT_CATALOG: List[Dict[str, str]] = [
         "name_en": "Tesla",
         "market": "US",
         "country": "US",
-        "provider": "stooq",
-        "provider_symbol": "tsla.us",
+        "provider": "kis",
+        "provider_symbol": "TSLA",
         "aliases": "tesla,테슬라,tsla",
     },
     {
@@ -94,8 +96,8 @@ US_INSTRUMENT_CATALOG: List[Dict[str, str]] = [
         "name_en": "Apple",
         "market": "US",
         "country": "US",
-        "provider": "stooq",
-        "provider_symbol": "aapl.us",
+        "provider": "kis",
+        "provider_symbol": "AAPL",
         "aliases": "apple,애플,aapl",
     },
     {
@@ -104,8 +106,8 @@ US_INSTRUMENT_CATALOG: List[Dict[str, str]] = [
         "name_en": "Microsoft",
         "market": "US",
         "country": "US",
-        "provider": "stooq",
-        "provider_symbol": "msft.us",
+        "provider": "kis",
+        "provider_symbol": "MSFT",
         "aliases": "microsoft,마이크로소프트,msft",
     },
 ]
@@ -182,8 +184,8 @@ def _resolve_us_instrument(query: str) -> Dict[str, str]:
         "display_name": normalized_symbol,
         "market": "US",
         "country": "US",
-        "provider": "stooq",
-        "provider_symbol": f"{normalized_symbol.lower()}.us",
+        "provider": "kis",
+        "provider_symbol": normalized_symbol,
         "query": query,
     }
 
@@ -418,9 +420,175 @@ async def fetch_kr_daily_prices_from_naver(provider_symbol: str) -> List[Dict[st
     return prices[-240:]
 
 
+def _get_kis_credentials() -> tuple[str, str]:
+    app_key = (os.getenv("KIS_APP_KEY") or "").strip()
+    app_secret = (os.getenv("KIS_APP_SECRET") or "").strip()
+    if not app_key or not app_secret:
+        raise ValueError("KIS 인증 정보가 설정되지 않았어. 서버 환경의 KIS_APP_KEY/KIS_APP_SECRET을 확인해줘.")
+    return app_key, app_secret
+
+
+def _extract_kis_token_expiry_seconds(payload: Dict[str, Any]) -> int:
+    expires_in = payload.get("expires_in")
+    try:
+        return max(int(float(expires_in)), 0)
+    except Exception:
+        return 0
+
+
+async def _get_kis_access_token() -> str:
+    now = time.time()
+    cached = str(_KIS_TOKEN_CACHE.get("access_token") or "").strip()
+    expires_at = float(_KIS_TOKEN_CACHE.get("expires_at") or 0.0)
+    if cached and now < expires_at - 30:
+        return cached
+
+    app_key, app_secret = _get_kis_credentials()
+    body = {
+        "grant_type": "client_credentials",
+        "appkey": app_key,
+        "appsecret": app_secret,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            response = await client.post(f"{KIS_BASE_URL}/oauth2/tokenP", json=body)
+            response.raise_for_status()
+        data = response.json()
+    except Exception as e:
+        logger.warning("KIS token fetch failed: %s", e)
+        raise ValueError("KIS 인증 토큰 발급에 실패했어.")
+
+    token = str(data.get("access_token") or "").strip()
+    if not token:
+        raise ValueError("KIS 인증 토큰이 비어 있어.")
+
+    expires_in = _extract_kis_token_expiry_seconds(data) or 3600
+    _KIS_TOKEN_CACHE["access_token"] = token
+    _KIS_TOKEN_CACHE["expires_at"] = now + expires_in
+    return token
+
+
+def _normalize_us_provider_symbol(provider_symbol: str) -> str:
+    symbol = provider_symbol.strip().upper()
+    for suffix in (".US", ".KS", ".KQ"):
+        if symbol.endswith(suffix):
+            symbol = symbol[: -len(suffix)]
+    return symbol
+
+
+async def _kis_get_json(path: str, params: Dict[str, Any], tr_id: str) -> Dict[str, Any]:
+    app_key, app_secret = _get_kis_credentials()
+    access_token = await _get_kis_access_token()
+    headers = {
+        "authorization": f"Bearer {access_token}",
+        "appkey": app_key,
+        "appsecret": app_secret,
+        "tr_id": tr_id,
+        "custtype": "P",
+    }
+    url = f"{KIS_BASE_URL}{path}"
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            response = await client.get(url, headers=headers, params=params)
+            response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        logger.warning("KIS request failed path=%s tr_id=%s params=%s error=%s", path, tr_id, params, e)
+        raise
+
+
+def _extract_kis_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    outputs = payload.get("output2")
+    if isinstance(outputs, list):
+        return [row for row in outputs if isinstance(row, dict)]
+    output = payload.get("output")
+    if isinstance(output, list):
+        return [row for row in output if isinstance(row, dict)]
+    return []
+
+
+def _parse_kis_daily_price_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    raw_day = str(row.get("xymd") or row.get("stck_bsop_date") or row.get("date") or "").strip()
+    if not raw_day:
+        return None
+    day = pd.to_datetime(raw_day, errors="coerce")
+    if pd.isna(day):
+        return None
+
+    def _to_float(*keys: str) -> Optional[float]:
+        for key in keys:
+            value = row.get(key)
+            if value in (None, ""):
+                continue
+            try:
+                return float(str(value).replace(",", ""))
+            except Exception:
+                continue
+        return None
+
+    opened = _to_float("open", "stck_oprc", "ovrs_nmix_oprc")
+    high = _to_float("high", "stck_hgpr", "ovrs_nmix_hgpr")
+    low = _to_float("low", "stck_lwpr", "ovrs_nmix_lwpr")
+    close = _to_float("clos", "close", "stck_clpr", "ovrs_nmix_prpr")
+    volume = _to_float("tvol", "acml_vol", "ovrs_cvol_vol") or 0.0
+    if any(value is None for value in (opened, high, low, close)):
+        return None
+    if min(opened or 0.0, high or 0.0, low or 0.0, close or 0.0) <= 0:
+        return None
+    return {
+        "time": day.strftime("%Y-%m-%d"),
+        "open": float(opened),
+        "high": float(high),
+        "low": float(low),
+        "close": float(close),
+        "volume": float(volume),
+    }
+
+
+async def fetch_us_daily_prices_from_kis(provider_symbol: str) -> List[Dict[str, Any]]:
+    symbol = _normalize_us_provider_symbol(provider_symbol)
+    if not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,9}", symbol):
+        raise ValueError("입력한 해외 종목 코드를 찾지 못했어. 티커를 다시 확인해줘.")
+
+    exchange_candidates = ("NAS", "NYS", "AMS")
+    path = "/uapi/overseas-price/v1/quotations/dailyprice"
+    logger.info("US KIS fetch start symbol=%s exchanges=%s", symbol, ",".join(exchange_candidates))
+    last_error: Optional[Exception] = None
+
+    for exchange in exchange_candidates:
+        params = {"AUTH": "", "EXCD": exchange, "SYMB": symbol, "GUBN": "0", "BYMD": "", "MODP": "0"}
+        try:
+            payload = await _kis_get_json(path, params, tr_id="HHDFS76240000")
+            rows = _extract_kis_rows(payload)
+            parsed = [entry for row in rows if (entry := _parse_kis_daily_price_row(row))]
+            parsed = sorted(parsed, key=lambda item: item["time"])
+            if len(parsed) >= 120:
+                logger.info("US KIS fetch success symbol=%s exchange=%s rows=%d", symbol, exchange, len(parsed))
+                return parsed[-240:]
+            logger.info("US KIS fetch insufficient rows symbol=%s exchange=%s rows=%d", symbol, exchange, len(parsed))
+        except Exception as e:
+            last_error = e
+            logger.info("US KIS fetch failed symbol=%s exchange=%s error=%s", symbol, exchange, e)
+
+    if last_error:
+        raise ValueError("미국 종목 시세를 KIS에서 불러오지 못했어. 잠시 후 다시 시도해줘.")
+    raise ValueError("입력한 해외 종목을 찾지 못했어. 티커를 다시 확인해줘.")
+
+
 async def fetch_prices_for_instrument(instrument: Dict[str, str]) -> List[Dict[str, Any]]:
     provider = instrument["provider"]
     provider_symbol = instrument["provider_symbol"]
+    logger.info(
+        "Price provider selection symbol=%s market=%s country=%s provider=%s provider_symbol=%s",
+        instrument.get("symbol"),
+        instrument.get("market"),
+        instrument.get("country"),
+        provider,
+        provider_symbol,
+    )
+    if provider == "kis" and instrument.get("country") == "US":
+        return await fetch_us_daily_prices_from_kis(provider_symbol)
     if provider == "naver":
         return await fetch_kr_daily_prices_from_naver(provider_symbol)
     if provider == "yahoo":
@@ -1414,6 +1582,13 @@ async def analyze(
                 raise ValueError("보유자 모드에서는 평단가와 보유수량을 입력해야 해")
 
         instrument = resolve_instrument(ticker)
+        logger.info(
+            "Analyze request resolved ticker=%s symbol=%s market=%s provider=%s",
+            ticker,
+            instrument.get("symbol"),
+            instrument.get("market"),
+            instrument.get("provider"),
+        )
         prices = await fetch_prices_for_instrument(instrument)
         analysis = build_analysis(prices)
         realtime_meta = select_realtime_quote(instrument["symbol"])
