@@ -488,11 +488,33 @@ async def _kis_get_json(path: str, params: Dict[str, Any], tr_id: str) -> Dict[s
         "custtype": "P",
     }
     url = f"{KIS_BASE_URL}{path}"
+    logger.info("KIS request start path=%s tr_id=%s params=%s", path, tr_id, params)
     try:
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
             response = await client.get(url, headers=headers, params=params)
-            response.raise_for_status()
-        return response.json()
+        try:
+            payload = response.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+
+        top_keys = sorted(payload.keys())
+        logger.info(
+            "KIS request done path=%s tr_id=%s status=%s keys=%s rt_cd=%s msg_cd=%s msg1=%s has_output=%s has_output1=%s has_output2=%s",
+            path,
+            tr_id,
+            response.status_code,
+            top_keys,
+            payload.get("rt_cd"),
+            payload.get("msg_cd"),
+            payload.get("msg1"),
+            "output" in payload,
+            "output1" in payload,
+            "output2" in payload,
+        )
+        response.raise_for_status()
+        return payload
     except Exception as e:
         logger.warning("KIS request failed path=%s tr_id=%s params=%s error=%s", path, tr_id, params, e)
         raise
@@ -500,6 +522,9 @@ async def _kis_get_json(path: str, params: Dict[str, Any], tr_id: str) -> Dict[s
 
 def _extract_kis_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
     outputs = payload.get("output2")
+    if isinstance(outputs, list):
+        return [row for row in outputs if isinstance(row, dict)]
+    outputs = payload.get("output1")
     if isinstance(outputs, list):
         return [row for row in outputs if isinstance(row, dict)]
     output = payload.get("output")
@@ -555,13 +580,29 @@ async def fetch_us_daily_prices_from_kis(provider_symbol: str) -> List[Dict[str,
     path = "/uapi/overseas-price/v1/quotations/dailyprice"
     logger.info("US KIS fetch start symbol=%s exchanges=%s", symbol, ",".join(exchange_candidates))
     last_error: Optional[Exception] = None
+    bimd = datetime.now(timezone.utc).strftime("%Y%m%d")
 
     for exchange in exchange_candidates:
-        params = {"AUTH": "", "EXCD": exchange, "SYMB": symbol, "GUBN": "0", "BYMD": "", "MODP": "0"}
+        params = {"AUTH": "", "EXCD": exchange, "SYMB": symbol, "GUBN": "0", "BYMD": bimd, "MODP": "0"}
         try:
             payload = await _kis_get_json(path, params, tr_id="HHDFS76240000")
             rows = _extract_kis_rows(payload)
+            logger.info(
+                "US KIS payload summary symbol=%s exchange=%s row_count=%d has_output=%s has_output1=%s has_output2=%s",
+                symbol,
+                exchange,
+                len(rows),
+                "output" in payload,
+                "output1" in payload,
+                "output2" in payload,
+            )
             parsed = [entry for row in rows if (entry := _parse_kis_daily_price_row(row))]
+            logger.info(
+                "US KIS parsed summary symbol=%s exchange=%s parsed_rows=%d",
+                symbol,
+                exchange,
+                len(parsed),
+            )
             parsed = sorted(parsed, key=lambda item: item["time"])
             if len(parsed) >= 120:
                 logger.info("US KIS fetch success symbol=%s exchange=%s rows=%d", symbol, exchange, len(parsed))
