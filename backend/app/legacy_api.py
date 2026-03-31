@@ -252,6 +252,17 @@ async def fetch_daily_prices(ticker: str) -> List[Dict[str, Any]]:
             text = response.text.strip()
             if text:
                 break
+        except httpx.ProxyError as e:
+            last_error = e
+            try:
+                async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, trust_env=False) as client:
+                    response = await client.get(STOOQ_URL, params=params)
+                    response.raise_for_status()
+                text = response.text.strip()
+                if text:
+                    break
+            except Exception as bypass_error:
+                last_error = bypass_error
         except Exception as e:
             last_error = e
             if attempt == 0:
@@ -293,6 +304,14 @@ async def fetch_yahoo_daily_prices(provider_symbol: str) -> List[Dict[str, Any]]
             response = await client.get(url, params=params)
             response.raise_for_status()
         data = response.json()
+    except httpx.ProxyError:
+        try:
+            async with httpx.AsyncClient(timeout=20.0, follow_redirects=True, trust_env=False) as client:
+                response = await client.get(url, params=params)
+                response.raise_for_status()
+            data = response.json()
+        except Exception:
+            raise ValueError("종목 시세를 불러오지 못했어. 잠시 후 다시 시도해줘.")
     except Exception:
         raise ValueError("종목 시세를 불러오지 못했어. 잠시 후 다시 시도해줘.")
     chart = data.get("chart", {})
