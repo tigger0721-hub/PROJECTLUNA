@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 REALTIME_QUOTE_MAX_AGE_SECONDS = 5.0
 _KIS_TOKEN_CACHE: Dict[str, Any] = {"access_token": None, "expires_at": 0.0}
 US_KIS_MIN_PARSED_ROWS = 90
+ANALYSIS_MIN_REQUIRED_ROWS = 60
 
 STYLE_GUIDE = {
     "conservative": {
@@ -853,8 +854,8 @@ def recalculate_summary_for_current_price(summary: Dict[str, Any], current_price
 
 
 def build_analysis(prices: List[Dict[str, Any]]) -> Dict[str, Any]:
-    if len(prices) < 120:
-        raise ValueError("분석하려면 최소 120일 정도 데이터가 필요해")
+    if len(prices) < ANALYSIS_MIN_REQUIRED_ROWS:
+        raise ValueError(f"분석하려면 최소 {ANALYSIS_MIN_REQUIRED_ROWS}일 정도 데이터가 필요해")
 
     df = pd.DataFrame(prices).copy()
     df["ma5"] = df["close"].rolling(5).mean()
@@ -873,7 +874,7 @@ def build_analysis(prices: List[Dict[str, Any]]) -> Dict[str, Any]:
     ma5 = float(latest["ma5"]) if pd.notna(latest["ma5"]) else current_price
     ma20 = float(latest["ma20"]) if pd.notna(latest["ma20"]) else current_price
     ma60 = float(latest["ma60"]) if pd.notna(latest["ma60"]) else current_price
-    ma120 = float(latest["ma120"]) if pd.notna(latest["ma120"]) else current_price
+    ma120 = float(latest["ma120"]) if pd.notna(latest["ma120"]) else ma60
 
     recent_20_high = float(df["high"].tail(20).max())
     recent_20_low = float(df["low"].tail(20).min())
