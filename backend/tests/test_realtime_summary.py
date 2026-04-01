@@ -172,3 +172,30 @@ def test_analyze_returns_200_for_target_tickers_with_kis_path(monkeypatch) -> No
     for ticker in ("NVDA", "CRCL", "005930"):
         response = client.get("/api/analyze", params={"ticker": ticker, "mode": "viewer", "style": "conservative"})
         assert response.status_code == 200
+
+
+def test_fetch_us_daily_prices_from_kis_accepts_100_rows(monkeypatch) -> None:
+    from app.legacy_api import fetch_us_daily_prices_from_kis
+
+    async def fake_kis_get_json(_path, params, tr_id):
+        assert tr_id == "HHDFS76240000"
+        if params["EXCD"] == "NAS":
+            rows = []
+            for i in range(100):
+                day = f"2026{(i // 28) + 1:02d}{(i % 28) + 1:02d}"
+                rows.append(
+                    {
+                        "xymd": day,
+                        "open": "100",
+                        "high": "110",
+                        "low": "90",
+                        "clos": "105",
+                        "tvol": "1000",
+                    }
+                )
+            return {"rt_cd": "0", "msg_cd": "MCA00000", "msg1": "정상처리 되었습니다.", "output2": rows}
+        return {"rt_cd": "0", "msg_cd": "MCA00000", "msg1": "정상처리 되었습니다.", "output2": []}
+
+    monkeypatch.setattr("app.legacy_api._kis_get_json", fake_kis_get_json)
+    prices = asyncio.run(fetch_us_daily_prices_from_kis("NVDA"))
+    assert len(prices) == 100

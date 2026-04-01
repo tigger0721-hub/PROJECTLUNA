@@ -36,6 +36,7 @@ KIS_BASE_URL = os.getenv("KIS_BASE_URL", "https://openapi.koreainvestment.com:94
 logger = logging.getLogger(__name__)
 REALTIME_QUOTE_MAX_AGE_SECONDS = 5.0
 _KIS_TOKEN_CACHE: Dict[str, Any] = {"access_token": None, "expires_at": 0.0}
+US_KIS_MIN_PARSED_ROWS = 90
 
 STYLE_GUIDE = {
     "conservative": {
@@ -609,7 +610,7 @@ async def fetch_us_daily_prices_from_kis(provider_symbol: str) -> List[Dict[str,
                 parsed_count,
             )
             parsed = sorted(parsed, key=lambda item: item["time"])
-            if parsed_count >= 120:
+            if parsed_count >= US_KIS_MIN_PARSED_ROWS:
                 logger.info("US KIS fetch success symbol=%s exchange=%s rows=%d", symbol, exchange, len(parsed))
                 return parsed[-240:]
             logger.info("US KIS fetch insufficient rows symbol=%s exchange=%s rows=%d", symbol, exchange, parsed_count)
