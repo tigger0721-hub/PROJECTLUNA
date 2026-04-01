@@ -580,6 +580,7 @@ async def fetch_us_daily_prices_from_kis(provider_symbol: str) -> List[Dict[str,
     path = "/uapi/overseas-price/v1/quotations/dailyprice"
     logger.info("US KIS fetch start symbol=%s exchanges=%s", symbol, ",".join(exchange_candidates))
     last_error: Optional[Exception] = None
+    debug_failures: List[str] = []
     bimd = datetime.now(timezone.utc).strftime("%Y%m%d")
 
     for exchange in exchange_candidates:
@@ -587,6 +588,9 @@ async def fetch_us_daily_prices_from_kis(provider_symbol: str) -> List[Dict[str,
         try:
             payload = await _kis_get_json(path, params, tr_id="HHDFS76240000")
             rows = _extract_kis_rows(payload)
+            rt_cd = payload.get("rt_cd")
+            msg_cd = payload.get("msg_cd")
+            msg1 = payload.get("msg1")
             logger.info(
                 "US KIS payload summary symbol=%s exchange=%s row_count=%d has_output=%s has_output1=%s has_output2=%s",
                 symbol,
@@ -597,23 +601,46 @@ async def fetch_us_daily_prices_from_kis(provider_symbol: str) -> List[Dict[str,
                 "output2" in payload,
             )
             parsed = [entry for row in rows if (entry := _parse_kis_daily_price_row(row))]
+            parsed_count = len(parsed)
             logger.info(
                 "US KIS parsed summary symbol=%s exchange=%s parsed_rows=%d",
                 symbol,
                 exchange,
-                len(parsed),
+                parsed_count,
             )
             parsed = sorted(parsed, key=lambda item: item["time"])
-            if len(parsed) >= 120:
+            if parsed_count >= 120:
                 logger.info("US KIS fetch success symbol=%s exchange=%s rows=%d", symbol, exchange, len(parsed))
                 return parsed[-240:]
-            logger.info("US KIS fetch insufficient rows symbol=%s exchange=%s rows=%d", symbol, exchange, len(parsed))
+            logger.info("US KIS fetch insufficient rows symbol=%s exchange=%s rows=%d", symbol, exchange, parsed_count)
+            debug_failures.append(
+                "exchange={exchange} reason=insufficient_rows parsed_rows={parsed_rows} row_count={row_count} "
+                "rt_cd={rt_cd} msg_cd={msg_cd} msg1={msg1} has_output={has_output} has_output1={has_output1} has_output2={has_output2}".format(
+                    exchange=exchange,
+                    parsed_rows=parsed_count,
+                    row_count=len(rows),
+                    rt_cd=rt_cd,
+                    msg_cd=msg_cd,
+                    msg1=msg1,
+                    has_output="output" in payload,
+                    has_output1="output1" in payload,
+                    has_output2="output2" in payload,
+                )
+            )
         except Exception as e:
             last_error = e
             logger.info("US KIS fetch failed symbol=%s exchange=%s error=%s", symbol, exchange, e)
+            http_status = getattr(getattr(e, "response", None), "status_code", None)
+            debug_failures.append(
+                f"exchange={exchange} reason=exception http_status={http_status} error={type(e).__name__}: {e}"
+            )
 
-    if last_error:
-        raise ValueError("미국 종목 시세를 KIS에서 불러오지 못했어. 잠시 후 다시 시도해줘.")
+    if last_error or debug_failures:
+        # TEMP DEBUG: include detailed KIS failure context directly in API error detail.
+        raise ValueError(
+            "미국 종목 시세를 KIS에서 불러오지 못했어. 잠시 후 다시 시도해줘. "
+            f"[TEMP DEBUG] symbol={symbol} bimd={bimd} failures={' | '.join(debug_failures)}"
+        )
     raise ValueError("입력한 해외 종목을 찾지 못했어. 티커를 다시 확인해줘.")
 
 
