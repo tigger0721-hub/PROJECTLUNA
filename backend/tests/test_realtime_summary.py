@@ -112,6 +112,26 @@ def test_analyze_response_includes_realtime_flags_for_fallback(monkeypatch) -> N
     assert summary["realtimeStale"] is False
 
 
+
+
+def test_resolve_instrument_prefers_stock_master_lookup(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.legacy_api.lookup_stock_master_instrument",
+        lambda _query: {
+            "symbol": "NVDA",
+            "display_name": "엔비디아",
+            "market": "US",
+            "country": "US",
+            "provider": "kis",
+            "provider_symbol": "NVDA",
+            "query": "엔비디아",
+        },
+    )
+
+    instrument = resolve_instrument("엔비디아")
+    assert instrument["symbol"] == "NVDA"
+    assert instrument["provider"] == "kis"
+
 def test_resolve_us_instrument_uses_kis_provider() -> None:
     instrument = resolve_instrument("NVDA")
     assert instrument["country"] == "US"
