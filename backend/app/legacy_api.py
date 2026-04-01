@@ -19,6 +19,8 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 
+from app.services.stock_master import lookup_stock_master_instrument
+
 app = FastAPI(title="Luna Stock Chart Tutor API")
 
 app.add_middleware(
@@ -220,6 +222,10 @@ def resolve_instrument(query: str) -> Dict[str, str]:
     normalized = _normalize_query_text(query)
     if not normalized:
         raise ValueError("입력한 종목을 찾지 못했어. 종목명이나 티커를 다시 확인해줘.")
+
+    stock_master_hit = lookup_stock_master_instrument(query)
+    if stock_master_hit:
+        return stock_master_hit
 
     catalog_hit = INSTRUMENT_INDEX.get(normalized)
     if catalog_hit:

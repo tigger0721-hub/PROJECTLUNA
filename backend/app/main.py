@@ -6,13 +6,16 @@ from fastapi import HTTPException
 
 from app.db.session import get_engine, init_db_engine, is_db_configured
 from app.legacy_api import app
+from app.services.stock_master import seed_stock_master_data
 
 logger = logging.getLogger(__name__)
 
 
 @app.on_event("startup")
 async def startup_db_init() -> None:
-    init_db_engine(validate_connection=True)
+    engine = init_db_engine(validate_connection=True)
+    if engine is not None:
+        seed_stock_master_data()
 
 
 @app.get("/health/db")
