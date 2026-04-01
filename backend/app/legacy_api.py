@@ -638,11 +638,14 @@ async def fetch_us_daily_prices_from_kis(provider_symbol: str) -> List[Dict[str,
             )
 
     if last_error or debug_failures:
-        # TEMP DEBUG: include detailed KIS failure context directly in API error detail.
-        raise ValueError(
-            "미국 종목 시세를 KIS에서 불러오지 못했어. 잠시 후 다시 시도해줘. "
-            f"[TEMP DEBUG] symbol={symbol} bimd={bimd} failures={' | '.join(debug_failures)}"
-        )
+        if debug_failures:
+            logger.warning(
+                "US KIS aggregated failures symbol=%s bimd=%s failures=%s",
+                symbol,
+                bimd,
+                " | ".join(debug_failures),
+            )
+        raise ValueError("미국 종목 시세를 KIS에서 불러오지 못했어. 잠시 후 다시 시도해줘.")
     raise ValueError("입력한 해외 종목을 찾지 못했어. 티커를 다시 확인해줘.")
 
 
@@ -1335,11 +1338,27 @@ def _normalize_ai_opinion_payload(payload: Dict[str, Any]) -> tuple[Optional[Dic
     commentary = str(payload.get("commentary", "")).strip()
     if not summary or not commentary:
         return None, "missing_fields"
+    summary = _sanitize_internal_field_terms(summary)
+    commentary = _sanitize_internal_field_terms(commentary)
     summary = summary[:70].strip()
     commentary = commentary[:540].strip()
     if _has_forbidden_tone(summary) or _has_forbidden_tone(commentary):
         return None, "forbidden_tone"
     return {"summary": summary, "commentary": commentary}, None
+
+
+def _sanitize_internal_field_terms(text: str) -> str:
+    sanitized = str(text or "")
+    replacements = {
+        "activeSupport": "핵심 지지선",
+        "activeResistance": "위쪽 저항",
+        "trendState": "추세 상태",
+        "reclaimLevel": "회복 기준 가격대",
+        "breakoutLevel": "돌파 확인 가격대",
+    }
+    for raw_key, korean_label in replacements.items():
+        sanitized = sanitized.replace(raw_key, korean_label)
+    return sanitized
 
 
 def _build_style_behavior_prompt(style: str, has_position: bool) -> str:
