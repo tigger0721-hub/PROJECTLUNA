@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import csv
 import logging
 import re
 import unicodedata
-from typing import Dict, Optional
+from pathlib import Path
+from typing import Any, Dict, Optional, Sequence
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -21,33 +23,126 @@ INITIAL_STOCK_MASTER_ROWS = [
     {"symbol": "TSLA", "name_ko": "테슬라", "name_en": "Tesla", "market": "US", "country": "US", "provider": "kis", "provider_symbol": "TSLA", "is_active": True},
 ]
 
+CSV_REQUIRED_COLUMNS = {
+    "symbol",
+    "name_ko",
+    "name_en",
+    "market",
+    "country",
+    "provider",
+    "provider_symbol",
+}
+
 
 def _normalize_query_text(query: str) -> str:
     normalized = unicodedata.normalize("NFKC", query).strip()
     return re.sub(r"\s+", " ", normalized)
 
 
-def seed_stock_master_data() -> None:
-    if get_engine() is None:
-        return
+def _parse_bool(value: str | None, default: bool = True) -> bool:
+    if value is None:
+        return default
 
+    normalized = value.strip().lower()
+    if not normalized:
+        return default
+
+    if normalized in {"1", "true", "t", "yes", "y"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n"}:
+        return False
+
+    raise ValueError(f"Invalid boolean value: {value}")
+
+
+def _normalize_import_row(row: Dict[str, str], row_num: int) -> Dict[str, Any]:
+    normalized = {key: (value or "").strip() for key, value in row.items()}
+    missing_required = [column for column in CSV_REQUIRED_COLUMNS if not normalized.get(column)]
+    if missing_required:
+        raise ValueError(f"Row {row_num}: missing required columns: {', '.join(sorted(missing_required))}")
+
+    return {
+        "symbol": normalized["symbol"],
+        "name_ko": normalized["name_ko"],
+        "name_en": normalized["name_en"],
+        "market": normalized["market"],
+        "country": normalized["country"],
+        "provider": normalized["provider"],
+        "provider_symbol": normalized["provider_symbol"],
+        "is_active": _parse_bool(normalized.get("is_active"), default=True),
+    }
+
+
+def load_stock_master_rows_from_csv(csv_path: str | Path) -> list[Dict[str, Any]]:
+    path = Path(csv_path)
+    if not path.exists():
+        raise FileNotFoundError(f"CSV file not found: {path}")
+
+    with path.open("r", encoding="utf-8-sig", newline="") as csv_file:
+        reader = csv.DictReader(csv_file)
+        if reader.fieldnames is None:
+            raise ValueError("CSV file is missing a header row")
+
+        headers = {field.strip() for field in reader.fieldnames if field}
+        missing_headers = CSV_REQUIRED_COLUMNS - headers
+        if missing_headers:
+            raise ValueError(
+                f"CSV is missing required headers: {', '.join(sorted(missing_headers))}"
+            )
+
+        rows: list[Dict[str, Any]] = []
+        for row_num, row in enumerate(reader, start=2):
+            rows.append(_normalize_import_row(row, row_num))
+
+    return rows
+
+
+def upsert_stock_master_rows(rows: Sequence[Dict[str, Any]]) -> tuple[int, int]:
+    if get_engine() is None:
+        raise RuntimeError("Database engine is not initialized")
+
+    inserted = 0
+    updated = 0
     session = get_db_session()
+
     try:
-        for row in INITIAL_STOCK_MASTER_ROWS:
+        for row in rows:
             existing = session.scalar(
                 select(StockMaster).where(
                     StockMaster.provider == row["provider"],
                     StockMaster.provider_symbol == row["provider_symbol"],
                 )
             )
-            if not existing:
+            if existing is None:
                 session.add(StockMaster(**row))
+                inserted += 1
+            else:
+                existing.symbol = row["symbol"]
+                existing.name_ko = row["name_ko"]
+                existing.name_en = row["name_en"]
+                existing.market = row["market"]
+                existing.country = row["country"]
+                existing.is_active = bool(row["is_active"])
+                updated += 1
+
         session.commit()
+        return inserted, updated
     except SQLAlchemyError:
         session.rollback()
-        logger.exception("Failed to seed stock master data")
+        logger.exception("Failed to upsert stock master rows")
+        raise
     finally:
         session.close()
+
+
+def seed_stock_master_data() -> None:
+    if get_engine() is None:
+        return
+
+    try:
+        upsert_stock_master_rows(INITIAL_STOCK_MASTER_ROWS)
+    except SQLAlchemyError:
+        logger.exception("Failed to seed stock master data")
 
 
 def lookup_stock_master_instrument(query: str) -> Optional[Dict[str, str]]:

@@ -1,0 +1,6 @@
+symbol,name_ko,name_en,market,country,provider,provider_symbol,is_active
+005930,삼성전자,Samsung Electronics,KRX,KR,naver,005930,true
+NVDA,엔비디아,NVIDIA,US,US,kis,NVDA,true
+CRCL,CRCL,CRCL,US,US,kis,CRCL
+AAPL,애플,Apple,US,US,kis,AAPL,true
+TSLA,테슬라,Tesla,US,US,kis,TSLA,true
