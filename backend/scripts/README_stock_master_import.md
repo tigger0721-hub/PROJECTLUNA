@@ -1,6 +1,24 @@
 # Stock Master CSV Import
 
-## Run
+## Convert overseas raw files to CSV
+
+From `backend/`:
+
+```bash
+python -m scripts.convert_overseas_master_to_csv \
+  ../stock_master_data/overseas/NASMST.COD \
+  ../stock_master_data/overseas/NYSMST.COD \
+  ../stock_master_data/overseas/AMSMST.COD \
+  -o data/samples/stock_master_overseas.csv
+```
+
+Notes:
+
+- This converter currently supports **overseas tab-delimited `.COD` raw files only**.
+- It intentionally does **not** parse domestic `.mst` files yet.
+- It reads source files as `ISO-8859-1` and writes UTF-8 CSV.
+
+## Run import
 
 From `backend/`:
 
