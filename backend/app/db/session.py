@@ -32,15 +32,7 @@ def _get_oracle_connect_config() -> Optional[tuple[str, str, str]]:
             "Incomplete DB config. Set DB_USER, DB_PASSWORD, and DB_DSN together."
         )
 
-    return db_user, db_password, _normalize_oracle_dsn(db_dsn)
-
-
-def _normalize_oracle_dsn(db_dsn: str) -> str:
-    # Oracle Autonomous DB no-wallet TLS is typically reached via Easy Connect on port 1522.
-    # Prefixing with tcps:// ensures thin mode negotiates TLS instead of plain TCP.
-    if "://" in db_dsn:
-        return db_dsn
-    return f"tcps://{db_dsn}"
+    return db_user, db_password, db_dsn
 
 
 def is_db_configured() -> bool:
