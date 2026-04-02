@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 from typing import Optional
-from urllib.parse import quote_plus
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
@@ -20,7 +19,7 @@ class DatabaseConfigurationError(RuntimeError):
     pass
 
 
-def _build_oracle_url() -> Optional[str]:
+def _get_oracle_connect_config() -> Optional[tuple[str, str, str]]:
     db_user = os.getenv("DB_USER")
     db_password = os.getenv("DB_PASSWORD")
     db_dsn = os.getenv("DB_DSN")
@@ -33,25 +32,35 @@ def _build_oracle_url() -> Optional[str]:
             "Incomplete DB config. Set DB_USER, DB_PASSWORD, and DB_DSN together."
         )
 
-    return f"oracle+oracledb://{quote_plus(db_user)}:{quote_plus(db_password)}@{db_dsn}"
+    return db_user, db_password, _normalize_oracle_dsn(db_dsn)
+
+
+def _normalize_oracle_dsn(db_dsn: str) -> str:
+    # Oracle Autonomous DB no-wallet TLS is typically reached via Easy Connect on port 1522.
+    # Prefixing with tcps:// ensures thin mode negotiates TLS instead of plain TCP.
+    if "://" in db_dsn:
+        return db_dsn
+    return f"tcps://{db_dsn}"
 
 
 def is_db_configured() -> bool:
-    return _build_oracle_url() is not None
+    return _get_oracle_connect_config() is not None
 
 
 def init_db_engine(validate_connection: bool = True) -> Optional[Engine]:
     global _engine, _SessionLocal
 
-    database_url = _build_oracle_url()
-    if database_url is None:
+    connect_config = _get_oracle_connect_config()
+    if connect_config is None:
         logger.info("DB config not provided. Running without DB engine.")
         _engine = None
         _SessionLocal = None
         return None
 
+    db_user, db_password, db_dsn = connect_config
     _engine = create_engine(
-        database_url,
+        "oracle+oracledb://",
+        connect_args={"user": db_user, "password": db_password, "dsn": db_dsn},
         pool_pre_ping=True,
         pool_recycle=3600,
     )
