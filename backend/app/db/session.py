@@ -50,9 +50,24 @@ def init_db_engine(validate_connection: bool = True) -> Optional[Engine]:
         return None
 
     db_user, db_password, db_dsn = connect_config
+    db_wallet_dir = os.getenv("DB_WALLET_DIR")
+
+    connect_args = {"user": db_user, "password": db_password, "dsn": db_dsn}
+    if db_wallet_dir:
+        connect_args.update(
+            {
+                "config_dir": db_wallet_dir,
+                "wallet_location": db_wallet_dir,
+            }
+        )
+        logger.info(
+            "DB_WALLET_DIR is set. Using wallet-based mTLS with DB_DSN TNS alias '%s'.",
+            db_dsn,
+        )
+
     _engine = create_engine(
         "oracle+oracledb://",
-        connect_args={"user": db_user, "password": db_password, "dsn": db_dsn},
+        connect_args=connect_args,
         pool_pre_ping=True,
         pool_recycle=3600,
     )
