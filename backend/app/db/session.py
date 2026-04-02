@@ -54,7 +54,6 @@ def init_db_engine(validate_connection: bool = True) -> Optional[Engine]:
         database_url,
         pool_pre_ping=True,
         pool_recycle=3600,
-        connect_args={"thick_mode": False},
     )
     _SessionLocal = sessionmaker(bind=_engine, autocommit=False, autoflush=False)
 
