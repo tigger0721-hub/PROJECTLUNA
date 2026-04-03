@@ -35,6 +35,7 @@ CSV_REQUIRED_COLUMNS = {
 
 _QUERY_MARKET_SUFFIX_RE = re.compile(r"\.(?:US|KS|KQ)$", re.IGNORECASE)
 _DOMESTIC_ISIN_PREFIX_RE = re.compile(r"^KR\d{10}")
+_US_PROVIDER_PREFIX_RE = re.compile(r"^(?:NAS|NYS|AMS)([A-Z0-9][A-Z0-9.\-]{0,14})$", re.IGNORECASE)
 _KOREAN_TEXT_ALIAS_MAP = {
     "쿠팡": "cpng",
     "엔비디아": "nvda",
@@ -66,8 +67,31 @@ def _extract_provider_suffix(provider_symbol: str) -> str:
     normalized = _normalize_lookup_key(provider_symbol)
     if not normalized:
         return ""
+    prefixed = re.match(r"^(?:nas|nys|ams)([a-z0-9][a-z0-9.\-]{0,14})$", normalized)
+    if prefixed:
+        return prefixed.group(1)
     match = re.search(r"[a-z]{1,6}$|[0-9]{4,6}$", normalized)
     return match.group(0) if match else normalized
+
+
+def _normalize_provider_symbol_for_row(
+    *,
+    symbol: str,
+    provider_symbol: str,
+    market: str,
+    country: str,
+) -> str:
+    normalized_provider_symbol = provider_symbol.strip().upper()
+    if not normalized_provider_symbol:
+        return symbol.strip().upper()
+
+    # KIS overseas master can emit exchange-prefixed symbols such as NYSCPNG/NASNVDA.
+    # We normalize to the plain ticker to keep lookup deterministic across raw/source variants.
+    if market.upper() == "US" or country.upper() == "US":
+        match = _US_PROVIDER_PREFIX_RE.match(normalized_provider_symbol)
+        if match:
+            return match.group(1)
+    return normalized_provider_symbol
 
 
 def _parse_bool(value: str | None, default: bool = True) -> bool:
@@ -92,14 +116,22 @@ def _normalize_import_row(row: Dict[str, str], row_num: int) -> Dict[str, Any]:
     if missing_required:
         raise ValueError(f"Row {row_num}: missing required columns: {', '.join(sorted(missing_required))}")
 
+    symbol = normalized["symbol"].upper() if normalized["country"].upper() == "US" else normalized["symbol"]
+    provider_symbol = _normalize_provider_symbol_for_row(
+        symbol=symbol,
+        provider_symbol=normalized["provider_symbol"],
+        market=normalized["market"],
+        country=normalized["country"],
+    )
+
     return {
-        "symbol": normalized["symbol"],
+        "symbol": symbol,
         "name_ko": normalized["name_ko"],
         "name_en": normalized["name_en"],
         "market": normalized["market"],
         "country": normalized["country"],
         "provider": normalized["provider"],
-        "provider_symbol": normalized["provider_symbol"],
+        "provider_symbol": provider_symbol,
         "is_active": _parse_bool(normalized.get("is_active"), default=True),
     }
 
@@ -196,6 +228,7 @@ def lookup_stock_master_instrument(query: str) -> Optional[Dict[str, str]]:
                 or_(
                     func.lower(StockMaster.symbol) == alias_key,
                     func.lower(StockMaster.provider_symbol) == alias_key,
+                    func.lower(func.substr(StockMaster.provider_symbol, 4)) == alias_key,
                 ),
             )
             .order_by(StockMaster.updated_at.desc())

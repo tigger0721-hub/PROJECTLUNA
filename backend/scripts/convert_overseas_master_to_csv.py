@@ -20,7 +20,7 @@ OUTPUT_COLUMNS = [
 ]
 
 TICKER_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9.\-]{0,14}$")
-PROVIDER_SYMBOL_PATTERN = re.compile(r"^(NAS|NYS|AMS)[A-Z0-9][A-Z0-9.\-]{0,14}$")
+PROVIDER_SYMBOL_PATTERN = re.compile(r"^(?:(NAS|NYS|AMS))?([A-Z0-9][A-Z0-9.\-]{0,14})$")
 MARKET_PATTERN = re.compile(r"^(NAS|NYS|AMS)$")
 
 
@@ -81,13 +81,22 @@ def resolve_market(fields: list[str], source_path: Path) -> str | None:
 
 
 def resolve_symbols(fields: list[str]) -> tuple[str | None, str | None]:
+    def normalize_provider_symbol(value: str) -> str:
+        candidate = normalize_field(value).upper()
+        if not candidate:
+            return ""
+        match = PROVIDER_SYMBOL_PATTERN.match(candidate)
+        if not match:
+            return ""
+        # Overseas master often prefixes exchange (NAS/NYS/AMS) onto provider symbols.
+        # Store plain ticker so importer/lookup works consistently regardless of source format.
+        return match.group(2)
+
     symbol = normalize_field(fields[4]).upper() if len(fields) > 4 else ""
-    provider_symbol = normalize_field(fields[5]).upper() if len(fields) > 5 else ""
+    provider_symbol = normalize_provider_symbol(fields[5]) if len(fields) > 5 else ""
 
     if not TICKER_PATTERN.match(symbol):
         symbol = ""
-    if not PROVIDER_SYMBOL_PATTERN.match(provider_symbol):
-        provider_symbol = ""
 
     if symbol and not provider_symbol:
         provider_symbol = symbol
@@ -101,8 +110,8 @@ def resolve_symbols(fields: list[str]) -> tuple[str | None, str | None]:
 
     if not provider_symbol:
         for field in fields:
-            candidate = normalize_field(field).upper()
-            if PROVIDER_SYMBOL_PATTERN.match(candidate):
+            candidate = normalize_provider_symbol(field)
+            if candidate:
                 provider_symbol = candidate
                 break
 
