@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Optional
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -17,6 +19,42 @@ _SessionLocal: Optional[sessionmaker[Session]] = None
 
 class DatabaseConfigurationError(RuntimeError):
     pass
+
+
+def _load_runtime_env() -> None:
+    backend_root = Path(__file__).resolve().parents[2]
+    load_dotenv(backend_root / ".env", override=False)
+    load_dotenv(backend_root.parent / ".env", override=False)
+
+
+def _resolve_wallet_dir() -> Optional[str]:
+    raw_wallet_dir = os.getenv("DB_WALLET_DIR")
+    if not raw_wallet_dir:
+        return None
+
+    wallet_dir = Path(raw_wallet_dir).expanduser().resolve()
+    if not wallet_dir.is_dir():
+        raise DatabaseConfigurationError(
+            f"DB_WALLET_DIR does not exist or is not a directory: {wallet_dir}"
+        )
+
+    tnsnames_path = wallet_dir / "tnsnames.ora"
+    if not tnsnames_path.is_file():
+        raise DatabaseConfigurationError(
+            f"DB_WALLET_DIR is missing required tnsnames.ora: {tnsnames_path}"
+        )
+
+    return str(wallet_dir)
+
+
+def _validate_non_interactive_wallet(wallet_dir: str) -> None:
+    pem_wallet = Path(wallet_dir) / "ewallet.pem"
+    wallet_password = os.getenv("DB_WALLET_PASSWORD")
+    if pem_wallet.is_file() and not wallet_password:
+        raise DatabaseConfigurationError(
+            "DB_WALLET_DIR contains ewallet.pem but DB_WALLET_PASSWORD is not set. "
+            "Set DB_WALLET_PASSWORD to avoid interactive PEM passphrase prompts at service startup."
+        )
 
 
 def _get_oracle_connect_config() -> Optional[tuple[str, str, str]]:
@@ -42,6 +80,7 @@ def is_db_configured() -> bool:
 def init_db_engine(validate_connection: bool = True) -> Optional[Engine]:
     global _engine, _SessionLocal
 
+    _load_runtime_env()
     connect_config = _get_oracle_connect_config()
     if connect_config is None:
         logger.info("DB config not provided. Running without DB engine.")
@@ -50,16 +89,21 @@ def init_db_engine(validate_connection: bool = True) -> Optional[Engine]:
         return None
 
     db_user, db_password, db_dsn = connect_config
-    db_wallet_dir = os.getenv("DB_WALLET_DIR")
+    db_wallet_dir = _resolve_wallet_dir()
 
     connect_args = {"user": db_user, "password": db_password, "dsn": db_dsn}
     if db_wallet_dir:
+        _validate_non_interactive_wallet(db_wallet_dir)
+        os.environ["TNS_ADMIN"] = db_wallet_dir
         connect_args.update(
             {
                 "config_dir": db_wallet_dir,
                 "wallet_location": db_wallet_dir,
             }
         )
+        db_wallet_password = os.getenv("DB_WALLET_PASSWORD")
+        if db_wallet_password:
+            connect_args["wallet_password"] = db_wallet_password
         logger.info(
             "DB_WALLET_DIR is set. Using wallet-based mTLS with DB_DSN TNS alias '%s'.",
             db_dsn,
@@ -78,9 +122,13 @@ def init_db_engine(validate_connection: bool = True) -> Optional[Engine]:
             with _engine.connect() as connection:
                 connection.execute(text("SELECT 1 FROM DUAL"))
             logger.info("Oracle DB connectivity check succeeded.")
+        except DatabaseConfigurationError:
+            raise
         except SQLAlchemyError as exc:
             logger.exception("Oracle DB connectivity check failed.")
-            raise RuntimeError("Database is configured but connectivity check failed.") from exc
+            raise RuntimeError(
+                "Database connectivity check failed. Verify DB_DSN, DB_WALLET_DIR/TNS_ADMIN, and wallet credentials."
+            ) from exc
 
     return _engine
 
