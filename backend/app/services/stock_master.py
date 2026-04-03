@@ -33,10 +33,41 @@ CSV_REQUIRED_COLUMNS = {
     "provider_symbol",
 }
 
+_QUERY_MARKET_SUFFIX_RE = re.compile(r"\.(?:US|KS|KQ)$", re.IGNORECASE)
+_DOMESTIC_ISIN_PREFIX_RE = re.compile(r"^KR\d{10}")
+_KOREAN_TEXT_ALIAS_MAP = {
+    "쿠팡": "cpng",
+    "엔비디아": "nvda",
+    "애플": "aapl",
+    "테슬라": "tsla",
+}
+_KOREAN_SIMPLE_NORMALIZATION_MAP = {"엘지": "lg"}
+
 
 def _normalize_query_text(query: str) -> str:
     normalized = unicodedata.normalize("NFKC", query).strip()
     return re.sub(r"\s+", " ", normalized)
+
+
+def _normalize_lookup_key(text: str) -> str:
+    normalized = _normalize_query_text(text).lower()
+    if not normalized:
+        return ""
+
+    normalized = _QUERY_MARKET_SUFFIX_RE.sub("", normalized)
+    normalized = normalized.replace(" ", "")
+    normalized = _DOMESTIC_ISIN_PREFIX_RE.sub("", normalized)
+    for src, dst in _KOREAN_SIMPLE_NORMALIZATION_MAP.items():
+        normalized = normalized.replace(src, dst)
+    return normalized
+
+
+def _extract_provider_suffix(provider_symbol: str) -> str:
+    normalized = _normalize_lookup_key(provider_symbol)
+    if not normalized:
+        return ""
+    match = re.search(r"[a-z]{1,6}$|[0-9]{4,6}$", normalized)
+    return match.group(0) if match else normalized
 
 
 def _parse_bool(value: str | None, default: bool = True) -> bool:
@@ -150,21 +181,72 @@ def lookup_stock_master_instrument(query: str) -> Optional[Dict[str, str]]:
     if not normalized or get_engine() is None:
         return None
 
-    normalized_lower = normalized.lower()
+    lookup_key = _normalize_lookup_key(normalized)
+    if not lookup_key:
+        return None
+    alias_key = _KOREAN_TEXT_ALIAS_MAP.get(lookup_key, lookup_key)
+
     session = get_db_session()
     try:
+        # Stage 1) strict symbol/provider_symbol lookup first for best precision and speed.
         stock = session.scalar(
             select(StockMaster)
             .where(
                 StockMaster.is_active.is_(True),
                 or_(
-                    func.lower(StockMaster.symbol) == normalized_lower,
-                    func.lower(StockMaster.name_ko) == normalized_lower,
-                    func.lower(StockMaster.name_en) == normalized_lower,
+                    func.lower(StockMaster.symbol) == alias_key,
+                    func.lower(StockMaster.provider_symbol) == alias_key,
                 ),
             )
             .order_by(StockMaster.updated_at.desc())
         )
+
+        # Provider symbols can have exchange prefixes (e.g. NYSCPNG), so permit suffix hits.
+        if stock is None:
+            stock = session.scalar(
+                select(StockMaster)
+                .where(
+                    StockMaster.is_active.is_(True),
+                    func.lower(StockMaster.provider_symbol).like(f"%{alias_key}"),
+                )
+                .order_by(StockMaster.updated_at.desc())
+            )
+
+        candidates = []
+        if stock is None:
+            candidates = session.scalars(
+                select(StockMaster)
+                .where(StockMaster.is_active.is_(True))
+                .order_by(StockMaster.updated_at.desc())
+            ).all()
+
+            # Stage 2) normalized exact match over symbol/provider/name fields.
+            for candidate in candidates:
+                if (
+                    _normalize_lookup_key(candidate.symbol or "") == alias_key
+                    or _normalize_lookup_key(candidate.provider_symbol or "") == alias_key
+                    or _extract_provider_suffix(candidate.provider_symbol or "") == alias_key
+                    or _normalize_lookup_key(candidate.name_ko or "") == alias_key
+                    or _normalize_lookup_key(candidate.name_en or "") == alias_key
+                ):
+                    stock = candidate
+                    break
+
+        # Stage 3) normalized partial match fallback for better real-world usability.
+        if stock is None and candidates:
+            for candidate in candidates:
+                for field_value in (
+                    candidate.symbol or "",
+                    candidate.provider_symbol or "",
+                    candidate.name_ko or "",
+                    candidate.name_en or "",
+                ):
+                    field_key = _normalize_lookup_key(field_value)
+                    if alias_key and field_key and (alias_key in field_key or field_key in alias_key):
+                        stock = candidate
+                        break
+                if stock is not None:
+                    break
     except SQLAlchemyError:
         logger.exception("Stock master lookup failed")
         return None
