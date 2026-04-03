@@ -192,7 +192,7 @@ def lookup_stock_master_instrument(query: str) -> Optional[Dict[str, str]]:
         stock = session.scalar(
             select(StockMaster)
             .where(
-                StockMaster.is_active.is_(True),
+                StockMaster.is_active == 1,
                 or_(
                     func.lower(StockMaster.symbol) == alias_key,
                     func.lower(StockMaster.provider_symbol) == alias_key,
@@ -206,7 +206,7 @@ def lookup_stock_master_instrument(query: str) -> Optional[Dict[str, str]]:
             stock = session.scalar(
                 select(StockMaster)
                 .where(
-                    StockMaster.is_active.is_(True),
+                    StockMaster.is_active == 1,
                     func.lower(StockMaster.provider_symbol).like(f"%{alias_key}"),
                 )
                 .order_by(StockMaster.updated_at.desc())
@@ -216,7 +216,7 @@ def lookup_stock_master_instrument(query: str) -> Optional[Dict[str, str]]:
         if stock is None:
             candidates = session.scalars(
                 select(StockMaster)
-                .where(StockMaster.is_active.is_(True))
+                .where(StockMaster.is_active == 1)
                 .order_by(StockMaster.updated_at.desc())
             ).all()
 
