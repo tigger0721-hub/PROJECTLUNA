@@ -7,7 +7,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, literal, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.db.session import get_db_session, get_engine
@@ -208,7 +208,22 @@ def seed_stock_master_data() -> None:
         logger.exception("Failed to seed stock master data")
 
 
-def lookup_stock_master_instrument(query: str) -> Optional[Dict[str, str]]:
+def _normalized_market_hint(market_hint: str | None) -> str:
+    if market_hint in {"KR", "US", "auto"}:
+        return str(market_hint)
+    return "auto"
+
+
+def _market_preference_order(market_hint: str | None):
+    normalized = _normalized_market_hint(market_hint)
+    if normalized == "KR":
+        return case((func.upper(StockMaster.country) == "KR", 0), else_=1)
+    if normalized == "US":
+        return case((func.upper(StockMaster.country) == "US", 0), else_=1)
+    return literal(0)
+
+
+def lookup_stock_master_instrument(query: str, market_hint: str | None = "auto") -> Optional[Dict[str, str]]:
     normalized = _normalize_query_text(query)
     if not normalized or get_engine() is None:
         return None
@@ -217,6 +232,7 @@ def lookup_stock_master_instrument(query: str) -> Optional[Dict[str, str]]:
     if not lookup_key:
         return None
     alias_key = _KOREAN_TEXT_ALIAS_MAP.get(lookup_key, lookup_key)
+    market_order = _market_preference_order(market_hint)
 
     session = get_db_session()
     try:
@@ -231,7 +247,7 @@ def lookup_stock_master_instrument(query: str) -> Optional[Dict[str, str]]:
                     func.lower(func.substr(StockMaster.provider_symbol, 4)) == alias_key,
                 ),
             )
-            .order_by(StockMaster.updated_at.desc())
+            .order_by(market_order, StockMaster.updated_at.desc())
         )
 
         # Provider symbols can have exchange prefixes (e.g. NYSCPNG), so permit suffix hits.
@@ -242,7 +258,7 @@ def lookup_stock_master_instrument(query: str) -> Optional[Dict[str, str]]:
                     StockMaster.is_active == 1,
                     func.lower(StockMaster.provider_symbol).like(f"%{alias_key}"),
                 )
-                .order_by(StockMaster.updated_at.desc())
+                .order_by(market_order, StockMaster.updated_at.desc())
             )
 
         candidates = []
@@ -250,7 +266,7 @@ def lookup_stock_master_instrument(query: str) -> Optional[Dict[str, str]]:
             candidates = session.scalars(
                 select(StockMaster)
                 .where(StockMaster.is_active == 1)
-                .order_by(StockMaster.updated_at.desc())
+                .order_by(market_order, StockMaster.updated_at.desc())
             ).all()
 
             # Stage 2) normalized exact match over symbol/provider/name fields.

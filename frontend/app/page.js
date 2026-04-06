@@ -56,6 +56,13 @@ const labelStyle = {
 
 export default function HomePage() {
   const [mode, setMode] = useState("viewer");
+  const [marketHint, setMarketHint] = useState("auto");
+
+  const marketOptions = [
+    { value: "auto", label: "자동" },
+    { value: "KR", label: "국내" },
+    { value: "US", label: "미국" }
+  ];
 
   return (
     <main style={pageStyle}>
@@ -78,6 +85,45 @@ export default function HomePage() {
                 style={inputStyle}
                 required
               />
+              <input type="hidden" name="market_hint" value={marketHint} />
+              <div
+                role="tablist"
+                aria-label="시장 선택"
+                style={{
+                  marginTop: 10,
+                  display: "inline-flex",
+                  gap: 6,
+                  padding: 4,
+                  borderRadius: 999,
+                  border: "1px solid #cbd5e1",
+                  background: "#f8fafc"
+                }}
+              >
+                {marketOptions.map((option) => {
+                  const active = marketHint === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => setMarketHint(option.value)}
+                      style={{
+                        border: "none",
+                        borderRadius: 999,
+                        padding: "7px 12px",
+                        fontSize: 13,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        color: active ? "#ffffff" : "#334155",
+                        background: active ? "#2563eb" : "transparent"
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             <div>
