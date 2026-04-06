@@ -218,12 +218,18 @@ def _resolve_kr_instrument_from_code(code: str) -> Dict[str, str]:
     }
 
 
-def resolve_instrument(query: str) -> Dict[str, str]:
+def _normalize_market_hint(market_hint: Optional[str]) -> str:
+    if market_hint in {"auto", "KR", "US"}:
+        return str(market_hint)
+    raise ValueError("market_hint는 auto, KR, US 중 하나여야 해")
+
+
+def resolve_instrument(query: str, market_hint: str = "auto") -> Dict[str, str]:
     normalized = _normalize_query_text(query)
     if not normalized:
         raise ValueError("입력한 종목을 찾지 못했어. 종목명이나 티커를 다시 확인해줘.")
 
-    stock_master_hit = lookup_stock_master_instrument(query)
+    stock_master_hit = lookup_stock_master_instrument(query, market_hint=market_hint)
     if stock_master_hit:
         return stock_master_hit
 
@@ -1664,6 +1670,7 @@ async def analyze(
     avg_price: Optional[float] = Query(None),
     quantity: Optional[int] = Query(None),
     style: str = Query("conservative"),
+    market_hint: str = Query("auto"),
 ) -> dict:
     try:
         if mode not in {"viewer", "holder"}:
@@ -1672,17 +1679,20 @@ async def analyze(
         if style not in STYLE_GUIDE:
             raise ValueError("지원하지 않는 투자성향이야")
 
+        normalized_market_hint = _normalize_market_hint(market_hint)
+
         if mode == "holder":
             if avg_price is None or quantity is None:
                 raise ValueError("보유자 모드에서는 평단가와 보유수량을 입력해야 해")
 
-        instrument = resolve_instrument(ticker)
+        instrument = resolve_instrument(ticker, market_hint=normalized_market_hint)
         logger.info(
-            "Analyze request resolved ticker=%s symbol=%s market=%s provider=%s",
+            "Analyze request resolved ticker=%s symbol=%s market=%s provider=%s market_hint=%s",
             ticker,
             instrument.get("symbol"),
             instrument.get("market"),
             instrument.get("provider"),
+            normalized_market_hint,
         )
         prices = await fetch_prices_for_instrument(instrument)
         analysis = build_analysis(prices)

@@ -7,6 +7,10 @@ export async function GET(request) {
   const avgPrice = searchParams.get("avg_price") || "";
   const quantity = searchParams.get("quantity") || "";
   const style = searchParams.get("style") || "conservative";
+  const marketHint = searchParams.get("market_hint") || "auto";
+  const normalizedMarketHint = ["auto", "KR", "US"].includes(marketHint)
+    ? marketHint
+    : "auto";
 
   const backendBase = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000";
 
@@ -14,6 +18,7 @@ export async function GET(request) {
   qs.set("ticker", ticker);
   qs.set("mode", mode);
   qs.set("style", style);
+  qs.set("market_hint", normalizedMarketHint);
 
   if (mode === "holder") {
     if (avgPrice !== "") qs.set("avg_price", avgPrice);
