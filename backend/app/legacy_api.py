@@ -713,6 +713,75 @@ def classify_trend_state(change_percent: float, recent_move_percent_5: float, da
     return "normal"
 
 
+def classify_market_state(
+    *,
+    current_price: float,
+    change_percent: float,
+    recent_move_percent_5: float,
+    volume_ratio: float,
+    ma5: float,
+    ma20: float,
+    ma60: float,
+    support_broken: bool,
+    resistance_broken: bool,
+    active_support: float,
+    active_resistance: float,
+    reclaim_level: Optional[float],
+    range_high_20: float,
+    range_low_20: float,
+    trend_state: str,
+) -> str:
+    if not current_price:
+        return "박스권"
+
+    def _near(level: Optional[float], pct: float = 0.012) -> bool:
+        if level is None or level <= 0:
+            return False
+        return abs(current_price - float(level)) / float(level) <= pct
+
+    near_range_high = _near(range_high_20, 0.015)
+    near_range_low = _near(range_low_20, 0.015)
+    near_reclaim = _near(reclaim_level, 0.012)
+    above_ma20 = current_price >= ma20
+    above_ma60 = current_price >= ma60
+    uptrend_bias = ma20 >= ma60
+    downtrend_bias = ma20 < ma60
+
+    if support_broken:
+        if near_reclaim and current_price <= float(reclaim_level) * 1.005:
+            return "지지 회복 시도"
+        if recent_move_percent_5 <= -2.0 and current_price < ma20 and ma5 <= ma20:
+            return "지지 이탈 약세 지속"
+        if recent_move_percent_5 >= 1.0 or (change_percent > 0 and current_price >= ma5):
+            if downtrend_bias:
+                return "하락추세 데드캣 반등"
+            return "지지 이탈 뒤 기술적 반등"
+        return "지지 이탈 약세 지속"
+
+    if uptrend_bias and above_ma60 and current_price >= ma20 * 0.985 and current_price <= ma20 * 1.02 and recent_move_percent_5 <= 1.5:
+        return "상승추세 눌림"
+
+    if near_range_low and change_percent > 0 and recent_move_percent_5 >= -1.0 and current_price >= ma5:
+        return "박스 하단 반등"
+
+    if near_range_high and (change_percent < 0 or (recent_move_percent_5 < 0 and current_price < ma5)):
+        return "박스 상단 저항 확인"
+
+    if resistance_broken and volume_ratio >= 1.15 and above_ma20:
+        return "돌파 시도"
+
+    if trend_state == "sharp_rise" and near_range_high and volume_ratio < 1.15:
+        return "추격 주의"
+
+    if trend_state == "range":
+        return "박스권"
+
+    if downtrend_bias and not above_ma20:
+        return "관망"
+
+    return "박스권"
+
+
 def _parse_timestamp_to_epoch_seconds(raw_value: Any) -> Optional[float]:
     if raw_value is None:
         return None
@@ -865,6 +934,27 @@ def recalculate_summary_for_current_price(summary: Dict[str, Any], current_price
         next_summary["breakoutLevel"] = round(float(resistance), 2) if resistance_broken else None
         next_summary["resistanceRole"] = "breakout_support" if resistance_broken else "active_resistance"
 
+    try:
+        next_summary["state"] = classify_market_state(
+            current_price=float(next_summary["currentPrice"]),
+            change_percent=float(next_summary.get("changePercent", 0.0)),
+            recent_move_percent_5=float(next_summary.get("recentMovePercent5", 0.0)),
+            volume_ratio=float(next_summary.get("volumeRatio", 1.0)),
+            ma5=float(next_summary.get("ma5", next_summary["currentPrice"])),
+            ma20=float(next_summary.get("ma20", next_summary["currentPrice"])),
+            ma60=float(next_summary.get("ma60", next_summary["currentPrice"])),
+            support_broken=bool(next_summary.get("supportBroken")),
+            resistance_broken=bool(next_summary.get("resistanceBroken")),
+            active_support=float(next_summary.get("activeSupport", next_summary.get("support", next_summary["currentPrice"]))),
+            active_resistance=float(next_summary.get("activeResistance", next_summary.get("resistance", next_summary["currentPrice"]))),
+            reclaim_level=float(next_summary["reclaimLevel"]) if next_summary.get("reclaimLevel") is not None else None,
+            range_high_20=float(next_summary.get("rangeHigh20", next_summary.get("resistance", next_summary["currentPrice"]))),
+            range_low_20=float(next_summary.get("rangeLow20", next_summary.get("support", next_summary["currentPrice"]))),
+            trend_state=str(next_summary.get("trendState", "normal")),
+        )
+    except (TypeError, ValueError):
+        pass
+
     return next_summary
 
 
@@ -1004,26 +1094,27 @@ def build_analysis(prices: List[Dict[str, Any]]) -> Dict[str, Any]:
     resistance = round(active_resistance, 2)
 
     above_ma20 = current_price > ma20
-    above_ma60 = current_price > ma60
-    strong_volume = volume_ratio >= 1.3
-    near_breakout = current_price >= recent_20_high * 0.985
-    pullback_zone = above_ma20 and current_price < recent_20_high * 0.97
-    breakdown = bool(current_price < ma20 and pd.notna(prev["ma20"]) and prev["close"] >= prev["ma20"])
     recent_5_close = float(df.iloc[-6]["close"]) if len(df) >= 6 else current_price
     recent_move_percent_5 = ((current_price - recent_5_close) / recent_5_close * 100) if recent_5_close else 0.0
     ma20_gap_percent = ((current_price - ma20) / ma20 * 100) if ma20 else 0.0
     trend_state = classify_trend_state(change_percent, recent_move_percent_5, daily_range_percent, ma20_gap_percent)
-
-    if near_breakout and strong_volume and above_ma20:
-        state = "돌파 시도"
-    elif pullback_zone and above_ma20 and above_ma60:
-        state = "눌림 구간"
-    elif breakdown:
-        state = "관망"
-    elif current_price >= recent_60_high * 0.99:
-        state = "추격 주의"
-    else:
-        state = "박스권"
+    state = classify_market_state(
+        current_price=current_price,
+        change_percent=change_percent,
+        recent_move_percent_5=recent_move_percent_5,
+        volume_ratio=volume_ratio,
+        ma5=ma5,
+        ma20=ma20,
+        ma60=ma60,
+        support_broken=support_broken,
+        resistance_broken=resistance_broken,
+        active_support=active_support,
+        active_resistance=active_resistance,
+        reclaim_level=reclaim_level,
+        range_high_20=recent_20_high,
+        range_low_20=recent_20_low,
+        trend_state=trend_state,
+    )
 
     if volume_ratio >= 1.6:
         volume_summary = f"거래량이 평균 대비 {volume_ratio:.2f}배로 꽤 강하게 붙어 있어."
@@ -1125,9 +1216,20 @@ def build_state_hint(summary: Dict[str, Any], has_position: bool, avg_price: Opt
     state = summary["state"]
     ma20 = summary["ma20"]
     trend_state = summary.get("trendState")
+    support_broken = bool(summary.get("supportBroken"))
 
     if trend_state == "sharp_drop":
         return "급락 방어 우선 구간"
+
+    state_hint_map = {
+        "지지 이탈 약세 지속": "하방 리스크 관리 구간",
+        "지지 이탈 뒤 기술적 반등": "기술적 반등 확인 구간",
+        "지지 회복 시도": "저항 재돌파 확인 구간",
+        "박스 하단 반등": "하단 반등 추적 구간",
+        "박스 상단 저항 확인": "상단 저항 확인 구간",
+        "상승추세 눌림": "추세 눌림 대응 구간",
+        "하락추세 데드캣 반등": "반등 매물 소화 구간",
+    }
 
     if has_position and avg_price is not None:
         pnl = ((current - avg_price) / avg_price) * 100 if avg_price else 0
@@ -1137,22 +1239,32 @@ def build_state_hint(summary: Dict[str, Any], has_position: bool, avg_price: Opt
             return "손절 판단 구간"
         if abs(current - support) / support <= 0.02:
             return "눌림 확인 구간"
+        if state in state_hint_map:
+            return state_hint_map[state]
         if pnl > 0 and style in {"protect_profit", "trend_partial"}:
             return "반등 시 매도 우선 구간"
 
     if not has_position:
         if state == "추격 주의":
             return "추격 금지 구간"
-        if state == "관망":
+        if state in {"관망", "지지 이탈 약세 지속"}:
             return "박스권 관망 구간"
-        if state == "눌림 구간":
+        if state in {"눌림 구간", "상승추세 눌림", "박스 하단 반등"}:
             return "눌림 매수 대기 구간"
+        if state in {"지지 회복 시도", "지지 이탈 뒤 기술적 반등", "하락추세 데드캣 반등"}:
+            return "반등 강도 확인 구간"
+        if state == "박스 상단 저항 확인":
+            return "상단 저항 대응 구간"
         if state == "돌파 시도":
             return "돌파 시도 구간"
 
+    if support_broken and state not in {"지지 이탈 뒤 기술적 반등", "지지 회복 시도"}:
+        return "하방 리스크 관리 구간"
+    if state in state_hint_map:
+        return state_hint_map[state]
     if state == "돌파 시도":
         return "돌파 시도 구간"
-    if state == "눌림 구간":
+    if state in {"눌림 구간", "상승추세 눌림"}:
         return "눌림 매수 대기 구간"
     if state == "관망":
         return "박스권 관망 구간"
@@ -1298,6 +1410,7 @@ def _fallback_ai_opinion(summary: Dict[str, Any]) -> Dict[str, str]:
     resistance_broken = bool(summary.get("resistanceBroken"))
     active_resistance = summary.get("activeResistance", summary.get("resistance"))
     breakout_level = summary.get("breakoutLevel")
+    state = summary.get("state")
 
     if trend_state == "sharp_drop":
         if support_broken and reclaim_level is not None:
@@ -1315,6 +1428,69 @@ def _fallback_ai_opinion(summary: Dict[str, Any]) -> Dict[str, str]:
                 f"오늘 {summary.get('changePercent', 0)}% 밀리면서 기대가 꺾여서 반등마다 정리 매물이 나올 수 있어. "
                 f"{active_support}에서 반등이 붙고 거래량이 살아나는 장면 전까지는 무리해서 들어가지 말고 기다리자. "
                 f"보유 중이면 {active_support} 이탈 때 불안 매도가 한 번 더 나올 수 있으니 축소 기준을 먼저 정해두는 게 안전해."
+            ),
+        }
+    if state == "지지 이탈 약세 지속" and reclaim_level is not None:
+        return {
+            "summary": "지지 이탈 뒤 아직 약세가 우위라 서두른 진입보다 방어 기준이 먼저야.",
+            "commentary": (
+                f"아래로 밀린 뒤 반등 힘이 약해서 {reclaim_level} 회복 전에는 되돌림 매물에 눌릴 가능성이 남아 있어. "
+                f"아래에서는 {active_support} 지지 반응이 먼저 확인돼야 하고, 위에서는 {active_resistance} 근처에서 다시 막히는지 같이 체크하자. "
+                "지금 구간은 예측보다 시나리오 대응이 유리해서, 보유자는 손실 확대 방지 기준을 먼저 짧게 잡는 편이 좋아."
+            ),
+        }
+    if state == "지지 이탈 뒤 기술적 반등" and reclaim_level is not None:
+        return {
+            "summary": "지지 이탈 이후 반등은 나오고 있지만 아직 회복 확인 전 단계야.",
+            "commentary": (
+                f"저점 반등이 붙었지만 핵심은 {reclaim_level} 재돌파 여부라서, 그 전까지는 추세 전환보다 기술적 반등으로 보는 게 맞아. "
+                f"{active_support}을 다시 깨지 않으면 반등 연장 가능성은 열려 있고, {active_resistance} 부근에서 거래량이 붙으면 회복 시도가 한 단계 올라갈 수 있어. "
+                "미보유자는 중간 추격보다 저항 돌파 확인 또는 재눌림 확인 중 하나를 기다리는 편이 손익비가 좋아."
+            ),
+        }
+    if state == "지지 회복 시도" and reclaim_level is not None:
+        return {
+            "summary": "지지 복구를 시험하는 구간이라 저항 돌파 확인 여부가 핵심이야.",
+            "commentary": (
+                f"가격이 {reclaim_level} 근처까지 올라와서 예전 지지선을 다시 넘길지 시험 중이야. "
+                f"여기서 안착하면 다음 타깃은 {active_resistance} 확인으로 이어지고, 밀리면 다시 {active_support} 재테스트 가능성이 커져. "
+                "그래서 지금은 방향 자체보다 이 구간에서 거래량이 붙는지, 종가 기준으로 안착하는지를 우선 보자."
+            ),
+        }
+    if state == "상승추세 눌림":
+        return {
+            "summary": "상승 흐름 안의 눌림 구간이라 지지 반응이 유지되면 재상승 시도가 가능한 자리야.",
+            "commentary": (
+                f"중기 추세가 꺾이지 않은 상태에서 가격이 쉬어가는 모습이라 {active_support} 부근 반응이 중요해. "
+                f"지지가 유지되면 다시 {active_resistance} 테스트로 연결될 수 있고, 이탈하면 단기 조정이 길어질 수 있어. "
+                "보유자는 손절보다 조건부 보유 관리가, 미보유자는 무리한 추격보다 눌림 확인 진입이 더 유리해 보여."
+            ),
+        }
+    if state == "박스 하단 반등":
+        return {
+            "summary": "박스 하단에서 반등이 붙는 구간이라 위쪽 저항까지의 단기 탄력 확인이 포인트야.",
+            "commentary": (
+                f"하단 지지 반응이 확인되고 있어 단기적으로는 {active_resistance} 방향 반등 시나리오가 유효해. "
+                f"다만 박스 장세 특성상 상단에서 다시 막힐 수 있으니 목표와 손절 기준을 함께 가져가는 대응이 좋아. "
+                f"{active_support} 아래로 다시 밀리면 반등 가정이 약해지니 그때는 관점을 빠르게 재정리하자."
+            ),
+        }
+    if state == "박스 상단 저항 확인":
+        return {
+            "summary": "상단 저항에서 한 번 막히는 흐름이라 단기 과열 추격보다는 재눌림 확인이 유리해.",
+            "commentary": (
+                f"상단 구간에서 매물이 나오고 있어 바로 돌파가 안 되면 {active_support} 쪽으로 되돌림이 나올 수 있어. "
+                f"그래도 되돌림 뒤 다시 힘을 모아 {active_resistance}를 넘기면 추세 확장으로 전환될 여지는 남아 있어. "
+                "지금은 상단에서 무리해 따라붙기보다, 눌림 후 재돌파 패턴을 기다리는 쪽이 안정적이야."
+            ),
+        }
+    if state == "하락추세 데드캣 반등":
+        return {
+            "summary": "하락 추세 안 반등 성격이 강해서 짧은 대응 후 확인이 필요한 구간이야.",
+            "commentary": (
+                f"반등은 나오고 있지만 큰 흐름이 약해서 {active_resistance}에서 다시 눌릴 가능성을 열어둬야 해. "
+                f"{active_support}을 지키는 동안은 기술적 반등이 이어질 수 있지만, 이탈하면 하방 압력이 바로 재개될 수 있어. "
+                "그래서 길게 낙관하기보다 짧게 확인하고, 실패 시 빠르게 정리하는 계획이 더 맞아."
             ),
         }
     if support_broken and reclaim_level is not None:
