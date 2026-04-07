@@ -1694,6 +1694,13 @@ def _build_system_prompt(has_position: bool, style: str) -> str:
         "뜻이 어색하거나 업계에서 거의 안 쓰는 단어는 쓰지 말고, 확신이 없는 용어는 더 쉬운 일상 표현으로 바꿔. "
         "문맥에 맞지 않는 오용·오타·억지 조어를 금지해(예: 호주량, 트레이딩 맥락의 폰트 같은 단어). "
         "대기라고 하면 왜 매수 주체가 아직 확신이 없는지와 어떤 매도 물량이 남아 있는지 설명하고, 진입이면 왜 매수 주체가 주도권을 잡는지, 손절이면 왜 공포/손절 연쇄가 커지는지, 익절이면 왜 차익실현·상단 매물이 나오는지까지 꼭 밝혀. "
+        "입력 JSON의 derivedState는 모호성 제거용 사실 요약이야. supportStatus/resistanceStatus/priceVsActiveSupport/priceVsActiveResistance/marketPhase를 문장 생성의 1차 기준으로 사용해. "
+        "하드 제약: supportBroken=false 이면 지지가 이미 깨졌다고 절대 쓰지 마. "
+        "하드 제약: currentPrice>=activeSupport 이면 지지가 이미 실패/붕괴/이탈 완료라고 절대 쓰지 마. "
+        "하드 제약: supportStatus=holding 이면 '지지 유지/방어' 맥락으로만 설명하고, broken 표현은 금지. "
+        "하드 제약: supportStatus=broken 일 때만 지지 이탈/붕괴 표현을 허용해. "
+        "하드 제약: reclaimLevel은 과거 지지 붕괴 이후 회복 확인용 가격대로만 다뤄. activeSupport와 같은 의미로 섞지 마. "
+        "하드 제약: priceVsActiveSupport/priceVsActiveResistance가 near면 방향 단정(완전 돌파/완전 이탈) 대신 테스트·공방으로 표현해. "
         "입력의 supportBroken이 true면 broken support를 현재 지지처럼 말하지 말고, reclaimLevel을 회복해야 하는 되돌림 저항으로 해석해. "
         "supportBroken이 true일 땐 activeSupport를 현재 유효 지지로 쓰고, supportBroken이 false일 때만 support를 일반 지지처럼 써. "
         "입력의 resistanceBroken이 true면 breakoutLevel은 이미 돌파된 자리로 보고, 현재 저항처럼 부르지 마. "
@@ -1710,6 +1717,44 @@ def _build_system_prompt(has_position: bool, style: str) -> str:
         "불릿/번호/제목/코드펜스/부가 텍스트 금지. "
         f"{behavior_prompt} {style_behavior_prompt}"
     )
+
+
+def _classify_price_vs_level(current_price: float, level: Optional[float], near_pct: float = 0.01) -> str:
+    if level is None or level <= 0:
+        return "near"
+    gap_ratio = (current_price - float(level)) / float(level)
+    if abs(gap_ratio) <= near_pct:
+        return "near"
+    return "above" if gap_ratio > 0 else "below"
+
+
+def _derive_market_phase(summary: Dict[str, Any]) -> str:
+    support_status = "broken" if bool(summary.get("supportBroken")) else "holding"
+    resistance_status = "broken" if bool(summary.get("resistanceBroken")) else "intact"
+    current_price = float(summary.get("currentPrice", 0.0) or 0.0)
+    active_support = summary.get("activeSupport", summary.get("support"))
+    active_resistance = summary.get("activeResistance", summary.get("resistance"))
+
+    price_vs_support = _classify_price_vs_level(current_price, float(active_support) if active_support is not None else None)
+    price_vs_resistance = _classify_price_vs_level(
+        current_price,
+        float(active_resistance) if active_resistance is not None else None,
+    )
+
+    if support_status == "broken" and resistance_status == "intact":
+        return "below_reclaim_recovery_attempt"
+    if support_status == "broken" and resistance_status == "broken":
+        return "post_breakdown_rebound_extension"
+    if support_status == "holding" and resistance_status == "intact":
+        if price_vs_support == "above" and price_vs_resistance == "below":
+            return "range_between_support_resistance"
+        if price_vs_support == "near":
+            return "support_retest_zone"
+        if price_vs_resistance == "near":
+            return "resistance_test_zone"
+    if support_status == "holding" and resistance_status == "broken":
+        return "post_breakout_retest_or_extension"
+    return "mixed_transition_zone"
 
 
 def generate_ai_opinion(
@@ -1729,10 +1774,22 @@ def generate_ai_opinion(
     has_position = personalization["hasPosition"]
     style = personalization.get("style", "conservative")
     system_prompt = _build_system_prompt(has_position, style)
+    support_broken = bool(summary.get("supportBroken", False))
+    resistance_broken = bool(summary.get("resistanceBroken", False))
+    current_price = float(summary["currentPrice"])
+    active_support = float(summary.get("activeSupport", summary["support"]))
+    active_resistance = float(summary.get("activeResistance", summary["resistance"]))
+    derived_state = {
+        "priceVsActiveSupport": _classify_price_vs_level(current_price, active_support),
+        "priceVsActiveResistance": _classify_price_vs_level(current_price, active_resistance),
+        "supportStatus": "broken" if support_broken else "holding",
+        "resistanceStatus": "broken" if resistance_broken else "intact",
+        "marketPhase": _derive_market_phase(summary),
+    }
 
     compact_payload = {
         "ticker": ticker.upper(),
-        "price": summary["currentPrice"],
+        "price": current_price,
         "prevClose": summary["prevClose"],
         "changePercent": summary["changePercent"],
         "dailyRangePercent": summary["dailyRangePercent"],
@@ -1742,15 +1799,16 @@ def generate_ai_opinion(
         "style": style,
         "state": summary["state"],
         "support": summary["support"],
-        "supportBroken": summary.get("supportBroken", False),
-        "activeSupport": summary.get("activeSupport", summary["support"]),
+        "supportBroken": support_broken,
+        "activeSupport": active_support,
         "reclaimLevel": summary.get("reclaimLevel"),
         "supportRole": summary.get("supportRole", "active_support"),
         "resistance": summary["resistance"],
-        "resistanceBroken": summary.get("resistanceBroken", False),
-        "activeResistance": summary.get("activeResistance", summary["resistance"]),
+        "resistanceBroken": resistance_broken,
+        "activeResistance": active_resistance,
         "breakoutLevel": summary.get("breakoutLevel"),
         "resistanceRole": summary.get("resistanceRole", "active_resistance"),
+        "derivedState": derived_state,
         "addBuyZone": personalization["suggestedAddBuyZone"],
         "stopLine": personalization["suggestedStop"],
         "takeProfit": personalization["suggestedTakeProfit"],
