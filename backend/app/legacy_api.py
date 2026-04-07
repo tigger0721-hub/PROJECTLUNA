@@ -70,6 +70,8 @@ STYLE_GUIDE = {
     },
 }
 
+HOLDER_PROFIT_PROTECT_PNL_THRESHOLD = 4.0
+
 
 def normalize_ticker(ticker: str) -> str:
     return ticker.strip().lower()
@@ -1332,6 +1334,21 @@ def build_personalization(
     add_buy_zone = round(min(support, current_price * 0.98), 2)
     stop_line = round(min(support * 0.98, current_price * 0.96), 2)
     first_take_profit = round(resistance, 2)
+    profit_zone_status = "flat_or_no_position"
+    holder_priority = "entry_timing_focus" if not has_position else "defense_first"
+    if has_position:
+        if pnl_percent is not None and pnl_percent >= HOLDER_PROFIT_PROTECT_PNL_THRESHOLD:
+            profit_zone_status = "clearly_positive"
+            holder_priority = "protect_profit_first"
+        elif pnl_percent is not None and pnl_percent > 0:
+            profit_zone_status = "slightly_positive"
+            holder_priority = "balanced_protect_and_defense"
+        elif pnl_percent is not None and pnl_percent <= -4:
+            profit_zone_status = "clearly_negative"
+            holder_priority = "capital_defense_first"
+        elif pnl_percent is not None:
+            profit_zone_status = "near_flat"
+            holder_priority = "risk_control_first"
 
     return {
         "mode": mode,
@@ -1347,6 +1364,8 @@ def build_personalization(
         "suggestedAddBuyZone": add_buy_zone,
         "suggestedStop": stop_line,
         "suggestedTakeProfit": first_take_profit,
+        "profitZoneStatus": profit_zone_status,
+        "holderPriority": holder_priority,
     }
 
 
@@ -1441,7 +1460,14 @@ def _has_forbidden_tone(text: str) -> bool:
     return any(token in text for token in banned)
 
 
-def _fallback_ai_opinion(summary: Dict[str, Any], has_position: bool) -> Dict[str, str]:
+def _viewer_risk_phrase() -> str:
+    return "진입 무효 기준/접근 철회 기준/시나리오 폐기 기준"
+
+
+def _fallback_ai_opinion(summary: Dict[str, Any], personalization: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+    has_position = bool((personalization or {}).get("hasPosition"))
+    pnl_percent = (personalization or {}).get("pnlPercent")
+    pnl_percent = float(pnl_percent) if isinstance(pnl_percent, (int, float)) else None
     trend_state = summary.get("trendState", "normal")
     support_broken = bool(summary.get("supportBroken"))
     active_support = summary.get("activeSupport", summary.get("support"))
@@ -1450,6 +1476,20 @@ def _fallback_ai_opinion(summary: Dict[str, Any], has_position: bool) -> Dict[st
     active_resistance = summary.get("activeResistance", summary.get("resistance"))
     breakout_level = summary.get("breakoutLevel")
     state = summary.get("state")
+    in_clear_profit = bool(
+        has_position and pnl_percent is not None and pnl_percent >= HOLDER_PROFIT_PROTECT_PNL_THRESHOLD
+    )
+
+    if has_position and in_clear_profit and trend_state in {"post_rally_pullback", "sharp_rise"}:
+        return {
+            "summary": "이미 수익권이면 깊은 지지보다 수익 보호와 상단 실패 대응을 먼저 챙기는 게 좋아.",
+            "commentary": (
+                f"평단 대비 여유가 있는 구간이라 지금은 더 먹는 것보다 지킨다는 관점이 우선이야. "
+                f"{active_resistance} 부근에서 윗꼬리나 거래량 둔화로 한 번 막히면 1차로 일부 먼저 줄여서 이익을 잠그고, "
+                f"남은 물량은 방어 기준을 기존 구조 지지보다 타이트하게 올려서 trailing처럼 관리하자. "
+                f"만약 상단 재돌파가 깔끔하게 이어지면 남은 물량은 추세를 더 따라가고, 재차 실패하면 비중을 한 번 더 낮춰서 수익 반납을 막는 쪽이 유리해."
+            ),
+        }
 
     if trend_state == "post_rally_pullback":
         return {
@@ -1458,7 +1498,7 @@ def _fallback_ai_opinion(summary: Dict[str, Any], has_position: bool) -> Dict[st
                 f"짧은 기간에 급하게 오른 뒤라 차익실현 물량이 나오면서 눌림이 생긴 흐름이야. "
                 f"{active_support} 근처에서 매수세가 다시 붙으면 {active_resistance} 재시험으로 이어질 가능성이 남아 있어. "
                 + (
-                    "미보유자는 중간 추격보다 눌림 반응 확인 뒤 분할 진입이 더 유리하고, "
+                    f"미보유자는 중간 추격보다 눌림 반응 확인 뒤 분할 접근이 더 유리하고, {_viewer_risk_phrase()}도 같이 정해두자. "
                     if not has_position
                     else "보유자는 성급한 정리보다 지지 훼손 여부를 보면서 수익 보호 기준을 같이 세우는 게 좋아. "
                 )
@@ -1475,7 +1515,7 @@ def _fallback_ai_opinion(summary: Dict[str, Any], has_position: bool) -> Dict[st
                 + (
                     f"보유 중이면 {active_support}가 흔들릴 때 공포 매도가 더 붙기 쉬우니 비중 먼저 가볍게 맞추는 게 좋아."
                     if has_position
-                    else "미보유자는 반등 확인 전까지 서두른 진입보다 관망이 손익비에 유리해."
+                    else f"미보유자는 반등 확인 전까지 서두른 진입보다 관망이 손익비에 유리하고, {_viewer_risk_phrase()}부터 정하고 보자."
                 )
             ),
         }
@@ -1484,7 +1524,11 @@ def _fallback_ai_opinion(summary: Dict[str, Any], has_position: bool) -> Dict[st
             "commentary": (
                 f"오늘 {summary.get('changePercent', 0)}% 밀리면서 기대가 꺾여서 반등마다 정리 매물이 나올 수 있어. "
                 f"{active_support}에서 반등이 붙고 거래량이 살아나는 장면 전까지는 무리해서 들어가지 말고 기다리자. "
-                f"보유 중이면 {active_support} 이탈 때 불안 매도가 한 번 더 나올 수 있으니 축소 기준을 먼저 정해두는 게 안전해."
+                + (
+                    f"보유 중이면 {active_support} 이탈 때 불안 매도가 한 번 더 나올 수 있으니 축소 기준을 먼저 정해두는 게 안전해."
+                    if has_position
+                    else f"미보유자는 {_viewer_risk_phrase()}을 먼저 적어두고 신호 확인 전 접근은 쉬어가는 게 좋아."
+                )
             ),
         }
     if state == "지지 이탈 약세 지속" and reclaim_level is not None:
@@ -1503,7 +1547,7 @@ def _fallback_ai_opinion(summary: Dict[str, Any], has_position: bool) -> Dict[st
                 f"저점 반등이 붙었지만 핵심은 {reclaim_level} 재돌파 여부라서, 그 전까지는 추세 전환보다 기술적 반등으로 보는 게 맞아. "
                 f"{active_support}을 다시 깨지 않으면 반등 연장 가능성은 열려 있고, {active_resistance} 부근에서 거래량이 붙으면 회복 시도가 한 단계 올라갈 수 있어. "
                 + (
-                    "미보유자는 중간 추격보다 저항 돌파 확인 또는 재눌림 확인 중 하나를 기다리는 편이 손익비가 좋아."
+                    f"미보유자는 중간 추격보다 저항 돌파 확인 또는 재눌림 확인 중 하나를 기다리고, {_viewer_risk_phrase()}을 정한 뒤 접근하는 편이 손익비가 좋아."
                     if not has_position
                     else "보유자는 반등 실패 시 빠르게 방어하고, 성공 시엔 비중 회복을 단계적으로 보자."
                 )
@@ -1536,8 +1580,12 @@ def _fallback_ai_opinion(summary: Dict[str, Any], has_position: bool) -> Dict[st
             "summary": "박스 하단에서 반등이 붙는 구간이라 위쪽 저항까지의 단기 탄력 확인이 포인트야.",
             "commentary": (
                 f"하단 지지 반응이 확인되고 있어 단기적으로는 {active_resistance} 방향 반등 시나리오가 유효해. "
-                f"다만 박스 장세 특성상 상단에서 다시 막힐 수 있으니 목표와 손절 기준을 함께 가져가는 대응이 좋아. "
-                f"{active_support} 아래로 다시 밀리면 반등 가정이 약해지니 그때는 관점을 빠르게 재정리하자."
+                + (
+                    f"다만 박스 장세 특성상 상단에서 다시 막힐 수 있으니 목표와 손절 기준을 함께 가져가는 대응이 좋아. "
+                    if has_position
+                    else f"다만 박스 장세 특성상 상단에서 다시 막힐 수 있으니 {_viewer_risk_phrase()}을 함께 가져가는 대응이 좋아. "
+                )
+                + f"{active_support} 아래로 다시 밀리면 반등 가정이 약해지니 그때는 관점을 빠르게 재정리하자."
             ),
         }
     if state == "박스 상단 저항 확인":
@@ -1591,7 +1639,7 @@ def _fallback_ai_opinion(summary: Dict[str, Any], has_position: bool) -> Dict[st
 
 
 def _violates_mode_guardrails(text: str, has_position: bool) -> bool:
-    viewer_forbidden = ["익절", "포지션 유지", "보유한 종목 관리", "보유 물량", "물량 관리"]
+    viewer_forbidden = ["손절", "익절", "포지션 유지", "보유한 종목 관리", "보유 물량", "물량 관리"]
     holder_forbidden = ["신규 진입 대기", "첫 진입", "처음 진입", "미보유자라면", "진입 대기"]
     banned = holder_forbidden if has_position else viewer_forbidden
     return any(token in text for token in banned)
@@ -1725,12 +1773,12 @@ def _build_mode_behavior_prompt(has_position: bool) -> str:
         "눌림이면 '어느 근처에서 반응 나오면 들어간다', 돌파면 '어느 저항 위 안착 확인 후 따라간다'처럼 실전 문장으로 이어줘. "
         "진입을 열어줄 때는 가능하면 초기 진입 비중 가이드(예: 30~50%)를 덧붙이고, 확인 신호 뒤 나머지 비중을 더하는 계획까지 같이 말해줘. "
         "목표가 제시가 가능하면 1차 목표에서 일부(예: 20~30%) 먼저 이익실현하고 잔여 물량은 추세를 보며 운영하는 흐름을 넣어줘. "
-        "리스크 관리는 반드시 손절/축소 조건을 명확한 가격 또는 차트 조건으로 제시해줘. "
+        "리스크 관리는 반드시 진입 무효 기준/접근 철회 기준/시나리오 폐기 기준으로 명확한 가격 또는 차트 조건을 제시해줘. "
         "단, 숫자는 억지로 채우지 말고 맥락상 자연스러울 때만 넣어."
         "지금 추격이 위험한 자리면 바로 따라붙지 말라고 자연스럽게 경고하고, 가능하면 한 문장 안에서 행동과 이유를 같이 말해줘. "
         "대기/진입/추격주의 각각의 이유는 차트 근거와 매수/매도 심리를 같이 붙여서 설명해줘(예: 거래량 약해 매수 확신 부족, 저항 근처 차익실현 매물, 지지 이탈 시 불안 매도). "
         "심리는 라벨처럼 짧게 끝내지 말고, 누가 왜 행동하는지까지 원인-결과로 풀어줘(예: 지지 이탈이라 불안한 매도가 겹치며 추가 하락 압력이 생길 수 있다). "
-        "대기/진입/추격주의/손절가/목표가 제안 각각에 심리 근거를 꼭 붙여서, '왜 지금 그 행동이 맞는지'를 참여자 행동 중심으로 이해되게 말해줘. "
+        "대기/진입/추격주의/진입 무효 기준/목표가 제안 각각에 심리 근거를 꼭 붙여서, '왜 지금 그 행동이 맞는지'를 참여자 행동 중심으로 이해되게 말해줘. "
         "문장은 보통 4~8문장 안에서 살아있는 대화체로, 체크리스트처럼 끊지 말고 흐름 있게 써줘. "
         "심리 설명이 빠지면 답변이 완성되지 않은 거야. "
         "마지막엔 한 줄 정도 편하게 멘탈 케어를 섞어."
@@ -1770,6 +1818,7 @@ def _build_system_prompt(has_position: bool, style: str) -> str:
         "뜻이 어색하거나 업계에서 거의 안 쓰는 단어는 쓰지 말고, 확신이 없는 용어는 더 쉬운 일상 표현으로 바꿔. "
         "문맥에 맞지 않는 오용·오타·억지 조어를 금지해(예: 호주량, 트레이딩 맥락의 폰트 같은 단어). "
         "대기라고 하면 왜 매수 주체가 아직 확신이 없는지와 어떤 매도 물량이 남아 있는지 설명하고, 진입이면 왜 매수 주체가 주도권을 잡는지, 손절이면 왜 공포/손절 연쇄가 커지는지, 익절이면 왜 차익실현·상단 매물이 나오는지까지 꼭 밝혀. "
+        "mode=viewer에서는 손절/익절을 직접 행동어로 쓰지 말고, 반드시 진입 무효 기준/접근 철회 기준/시나리오 폐기 기준으로 바꿔 표현해. "
         "입력 JSON의 derivedState는 모호성 제거용 사실 요약이야. supportStatus/resistanceStatus/priceVsActiveSupport/priceVsActiveResistance/marketPhase를 문장 생성의 1차 기준으로 사용해. "
         "하드 제약: supportBroken=false 이면 지지가 이미 깨졌다고 절대 쓰지 마. "
         "하드 제약: currentPrice>=activeSupport 이면 지지가 이미 실패/붕괴/이탈 완료라고 절대 쓰지 마. "
@@ -1789,8 +1838,9 @@ def _build_system_prompt(has_position: bool, style: str) -> str:
         "momentumPhase가 post_rally_pullback이고 supportStatus=holding이면 약세 붕괴 표현(급락 추세 고착, 구조적 붕괴)을 금지하고 지지 확인 기반 시나리오로 말해. "
         "mode가 holder일 때는 신규 진입 대기 코칭을 하지 말고, 기존 포지션 관리(유지/추가대응/부분익절/비중축소/손절/방어)에 집중해. "
         "mode가 viewer일 때는 보유 물량 관리보다 진입 타이밍(눌림 진입 vs 돌파 진입), 추격 회피, 초기 비중 설계에 집중해. "
-        "하드 제약: mode=viewer에서는 '익절', '포지션 유지', '보유한 종목 관리', '보유 물량 관리' 같은 보유자 전용 표현을 절대 쓰지 마. "
+        "하드 제약: mode=viewer에서는 '손절', '익절', '포지션 유지', '보유한 종목 관리', '보유 물량 관리' 같은 표현을 절대 쓰지 마. "
         "하드 제약: mode=holder에서는 '신규 진입 대기', '첫 진입', '처음 진입'처럼 미보유자 관점 코칭을 절대 쓰지 마. "
+        "holder에서 pnlPercent>=4이고 저항 테스트/급등 후 눌림 맥락이면 깊은 구조 지지 하나만 보지 말고 수익 보호, 부분익절, 타이트한 방어, 상단 실패 시 축소를 우선 제시해. "
         "내부 변수명이나 영어 필드명(예: sharp_drop, activeSupport, reclaimLevel, breakoutLevel, trendState)은 절대 그대로 노출하지 마. "
         "보고서체, 설명체, 체크리스트 말투 금지. 정의하듯 말하지 말고 차트를 같이 보는 대화처럼 말해. "
         "투자 성향 이름(예: 보수형/수익보호형 같은 라벨)을 문장에 드러내지 말고, 판단 기울기만 자연스럽게 녹여. "
@@ -1888,6 +1938,8 @@ def generate_ai_opinion(
         "marketPhase": _derive_market_phase(summary),
         "actionScope": "position_management_only" if has_position else "entry_timing_only",
         "momentumPhase": _derive_momentum_phase(summary),
+        "profitZoneStatus": personalization.get("profitZoneStatus", "flat_or_no_position"),
+        "holderPriority": personalization.get("holderPriority", "entry_timing_focus"),
     }
 
     compact_payload = {
@@ -2024,7 +2076,7 @@ def generate_ai_opinion(
 
     elapsed = time.perf_counter() - started_at
     logger.warning("AI opinion fallback used after %.3fs", elapsed)
-    return _fallback_ai_opinion(summary, has_position)
+    return _fallback_ai_opinion(summary, personalization)
 
 
 @app.get("/health")
@@ -2093,7 +2145,7 @@ async def analyze(
             or not str(ai_opinion.get("summary", "")).strip()
             or not str(ai_opinion.get("commentary", "")).strip()
         ):
-            ai_opinion = _fallback_ai_opinion(analysis["summary"], personalization["hasPosition"])
+            ai_opinion = _fallback_ai_opinion(analysis["summary"], personalization)
 
         analysis["explanation"] = analysis["trendSummary"]
         analysis["lessons"] = []
