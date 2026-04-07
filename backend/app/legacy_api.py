@@ -705,7 +705,24 @@ def build_recent_trend_summary(df: pd.DataFrame) -> str:
     return f"단기와 중기 흐름이 섞여 있어서 방향성이 아주 강하진 않아. 5일 기준 {change_5:.1f}%, 20일 기준 {change_20:.1f}% 움직였어."
 
 
-def classify_trend_state(change_percent: float, recent_move_percent_5: float, daily_range_percent: float, ma20_gap_percent: float) -> str:
+def classify_trend_state(
+    change_percent: float,
+    recent_move_percent_5: float,
+    daily_range_percent: float,
+    ma20_gap_percent: float,
+    recent_move_percent_20: float = 0.0,
+    ma60_gap_percent: float = 0.0,
+    support_broken: bool = False,
+) -> str:
+    if (
+        recent_move_percent_20 >= 8.0
+        and recent_move_percent_5 <= -1.0
+        and recent_move_percent_5 >= -5.0
+        and ma20_gap_percent >= -2.5
+        and ma60_gap_percent >= -1.5
+        and not support_broken
+    ):
+        return "post_rally_pullback"
     if change_percent <= -4.0 or (recent_move_percent_5 <= -8.0 and ma20_gap_percent <= -1.0):
         return "sharp_drop"
     if change_percent >= 4.0 or (recent_move_percent_5 >= 8.0 and ma20_gap_percent >= 1.0):
@@ -771,6 +788,9 @@ def classify_market_state(
 
     if resistance_broken and volume_ratio >= 1.15 and above_ma20:
         return "돌파 시도"
+
+    if trend_state == "post_rally_pullback" and not support_broken and above_ma20:
+        return "급등 후 눌림"
 
     if trend_state == "sharp_rise" and near_range_high and volume_ratio < 1.15:
         return "추격 주의"
@@ -921,6 +941,11 @@ def recalculate_summary_for_current_price(summary: Dict[str, Any], current_price
             float(next_summary["recentMovePercent5"]),
             float(next_summary["dailyRangePercent"]),
             ma20_gap_percent,
+            float(next_summary.get("recentMovePercent20", 0.0)),
+            ((float(current_price) - float(next_summary.get("ma60", current_price))) / float(next_summary.get("ma60", current_price)) * 100)
+            if float(next_summary.get("ma60", current_price))
+            else 0.0,
+            bool(next_summary.get("supportBroken")),
         )
 
     support = next_summary.get("support")
@@ -1098,8 +1123,19 @@ def build_analysis(prices: List[Dict[str, Any]]) -> Dict[str, Any]:
     above_ma20 = current_price > ma20
     recent_5_close = float(df.iloc[-6]["close"]) if len(df) >= 6 else current_price
     recent_move_percent_5 = ((current_price - recent_5_close) / recent_5_close * 100) if recent_5_close else 0.0
+    recent_20_close = float(df.iloc[-21]["close"]) if len(df) >= 21 else current_price
+    recent_move_percent_20 = ((current_price - recent_20_close) / recent_20_close * 100) if recent_20_close else 0.0
     ma20_gap_percent = ((current_price - ma20) / ma20 * 100) if ma20 else 0.0
-    trend_state = classify_trend_state(change_percent, recent_move_percent_5, daily_range_percent, ma20_gap_percent)
+    ma60_gap_percent = ((current_price - ma60) / ma60 * 100) if ma60 else 0.0
+    trend_state = classify_trend_state(
+        change_percent,
+        recent_move_percent_5,
+        daily_range_percent,
+        ma20_gap_percent,
+        recent_move_percent_20,
+        ma60_gap_percent,
+        support_broken,
+    )
     state = classify_market_state(
         current_price=current_price,
         change_percent=change_percent,
@@ -1174,6 +1210,7 @@ def build_analysis(prices: List[Dict[str, Any]]) -> Dict[str, Any]:
             "dayLow": round(float(latest["low"]), 2),
             "dailyRangePercent": round(daily_range_percent, 2),
             "recentMovePercent5": round(recent_move_percent_5, 2),
+            "recentMovePercent20": round(recent_move_percent_20, 2),
             "trendState": trend_state,
             "ma5": round(ma5, 2),
             "ma20": round(ma20, 2),
@@ -1404,7 +1441,7 @@ def _has_forbidden_tone(text: str) -> bool:
     return any(token in text for token in banned)
 
 
-def _fallback_ai_opinion(summary: Dict[str, Any]) -> Dict[str, str]:
+def _fallback_ai_opinion(summary: Dict[str, Any], has_position: bool) -> Dict[str, str]:
     trend_state = summary.get("trendState", "normal")
     support_broken = bool(summary.get("supportBroken"))
     active_support = summary.get("activeSupport", summary.get("support"))
@@ -1414,6 +1451,20 @@ def _fallback_ai_opinion(summary: Dict[str, Any]) -> Dict[str, str]:
     breakout_level = summary.get("breakoutLevel")
     state = summary.get("state")
 
+    if trend_state == "post_rally_pullback":
+        return {
+            "summary": "급등 뒤 숨 고르기 구간이라 추세 훼손 여부보다 지지 반응 확인이 먼저야.",
+            "commentary": (
+                f"짧은 기간에 급하게 오른 뒤라 차익실현 물량이 나오면서 눌림이 생긴 흐름이야. "
+                f"{active_support} 근처에서 매수세가 다시 붙으면 {active_resistance} 재시험으로 이어질 가능성이 남아 있어. "
+                + (
+                    "미보유자는 중간 추격보다 눌림 반응 확인 뒤 분할 진입이 더 유리하고, "
+                    if not has_position
+                    else "보유자는 성급한 정리보다 지지 훼손 여부를 보면서 수익 보호 기준을 같이 세우는 게 좋아. "
+                )
+                + f"{active_support}이 종가 기준으로 무너지면 단기 냉각이 더 길어질 수 있으니 그때는 대응 속도를 높이자."
+            ),
+        }
     if trend_state == "sharp_drop":
         if support_broken and reclaim_level is not None:
             return {
@@ -1421,9 +1472,13 @@ def _fallback_ai_opinion(summary: Dict[str, Any]) -> Dict[str, str]:
                 "commentary": (
                     f"{reclaim_level}은 원래 지지였는데 이미 깨져서 되돌림 때 매도 물량이 나올 확률이 커. "
                     f"반등이 나와도 {reclaim_level}을 다시 올려놓기 전엔 추격하지 말고, 아래에선 {active_support} 지키는지부터 보자. "
+                + (
                     f"보유 중이면 {active_support}가 흔들릴 때 공포 매도가 더 붙기 쉬우니 비중 먼저 가볍게 맞추는 게 좋아."
-                ),
-            }
+                    if has_position
+                    else "미보유자는 반등 확인 전까지 서두른 진입보다 관망이 손익비에 유리해."
+                )
+            ),
+        }
         return {
             "summary": "급락 구간이라 욕심내기보다 방어 신호 확인이 먼저야.",
             "commentary": (
@@ -1447,7 +1502,11 @@ def _fallback_ai_opinion(summary: Dict[str, Any]) -> Dict[str, str]:
             "commentary": (
                 f"저점 반등이 붙었지만 핵심은 {reclaim_level} 재돌파 여부라서, 그 전까지는 추세 전환보다 기술적 반등으로 보는 게 맞아. "
                 f"{active_support}을 다시 깨지 않으면 반등 연장 가능성은 열려 있고, {active_resistance} 부근에서 거래량이 붙으면 회복 시도가 한 단계 올라갈 수 있어. "
-                "미보유자는 중간 추격보다 저항 돌파 확인 또는 재눌림 확인 중 하나를 기다리는 편이 손익비가 좋아."
+                + (
+                    "미보유자는 중간 추격보다 저항 돌파 확인 또는 재눌림 확인 중 하나를 기다리는 편이 손익비가 좋아."
+                    if not has_position
+                    else "보유자는 반등 실패 시 빠르게 방어하고, 성공 시엔 비중 회복을 단계적으로 보자."
+                )
             ),
         }
     if state == "지지 회복 시도" and reclaim_level is not None:
@@ -1465,7 +1524,11 @@ def _fallback_ai_opinion(summary: Dict[str, Any]) -> Dict[str, str]:
             "commentary": (
                 f"중기 추세가 꺾이지 않은 상태에서 가격이 쉬어가는 모습이라 {active_support} 부근 반응이 중요해. "
                 f"지지가 유지되면 다시 {active_resistance} 테스트로 연결될 수 있고, 이탈하면 단기 조정이 길어질 수 있어. "
-                "보유자는 손절보다 조건부 보유 관리가, 미보유자는 무리한 추격보다 눌림 확인 진입이 더 유리해 보여."
+                + (
+                    "보유자는 손절보다 조건부 보유 관리가 더 유리해 보여."
+                    if has_position
+                    else "미보유자는 무리한 추격보다 눌림 확인 진입이 더 유리해 보여."
+                )
             ),
         }
     if state == "박스 하단 반등":
@@ -1518,12 +1581,23 @@ def _fallback_ai_opinion(summary: Dict[str, Any]) -> Dict[str, str]:
         "commentary": (
             f"지금 가격은 {summary['currentPrice']} 근처고, 핵심은 {active_support} 지지랑 {active_resistance} 저항 반응이야. "
             f"거래량이 평균 대비 {summary['volumeRatio']}배라서 힘이 확 붙는 자리는 아직 더 확인해보는 게 좋아 보여. "
-            "보유 중이면 지지 깨지는지만 먼저 보고, 미보유면 눌림이나 안착이 나오는지 같이 보자."
+            + (
+                "보유 중이면 지지 깨지는지만 먼저 보고 대응하자."
+                if has_position
+                else "미보유면 눌림이나 안착이 나오는지 같이 보자."
+            )
         ),
     }
 
 
-def _normalize_ai_opinion_payload(payload: Dict[str, Any]) -> tuple[Optional[Dict[str, str]], Optional[str]]:
+def _violates_mode_guardrails(text: str, has_position: bool) -> bool:
+    viewer_forbidden = ["익절", "포지션 유지", "보유한 종목 관리", "보유 물량", "물량 관리"]
+    holder_forbidden = ["신규 진입 대기", "첫 진입", "처음 진입", "미보유자라면", "진입 대기"]
+    banned = holder_forbidden if has_position else viewer_forbidden
+    return any(token in text for token in banned)
+
+
+def _normalize_ai_opinion_payload(payload: Dict[str, Any], has_position: bool) -> tuple[Optional[Dict[str, str]], Optional[str]]:
     summary = str(payload.get("summary", "")).strip()
     commentary = str(payload.get("commentary", "")).strip()
     if not summary or not commentary:
@@ -1534,6 +1608,8 @@ def _normalize_ai_opinion_payload(payload: Dict[str, Any]) -> tuple[Optional[Dic
     commentary = commentary[:540].strip()
     if _has_forbidden_tone(summary) or _has_forbidden_tone(commentary):
         return None, "forbidden_tone"
+    if _violates_mode_guardrails(summary, has_position) or _violates_mode_guardrails(commentary, has_position):
+        return None, "mode_guardrail_violation"
     return {"summary": summary, "commentary": commentary}, None
 
 
@@ -1709,8 +1785,12 @@ def _build_system_prompt(has_position: bool, style: str) -> str:
         "입력의 trendState가 sharp_drop이면 방어를 최우선으로 보고, 지지 근처라는 이유만으로 매수 제안을 하지 마. "
         "sharp_drop에서는 반등 확인, 지지 안정, 거래량 회복 같은 확인 신호가 있을 때만 진입을 제한적으로 허용해. "
         "sharp_drop + holder면 손절/비중축소 같은 자금보호 기준을 먼저 제시하고, sharp_drop + viewer면 기본값을 관망으로 둬. "
+        "입력의 momentumPhase가 post_rally_pullback이면 '급락 방어장'으로 단정하지 말고, 급등 후 차익실현으로 생긴 눌림/숨고르기 맥락을 우선 설명해. "
+        "momentumPhase가 post_rally_pullback이고 supportStatus=holding이면 약세 붕괴 표현(급락 추세 고착, 구조적 붕괴)을 금지하고 지지 확인 기반 시나리오로 말해. "
         "mode가 holder일 때는 신규 진입 대기 코칭을 하지 말고, 기존 포지션 관리(유지/추가대응/부분익절/비중축소/손절/방어)에 집중해. "
         "mode가 viewer일 때는 보유 물량 관리보다 진입 타이밍(눌림 진입 vs 돌파 진입), 추격 회피, 초기 비중 설계에 집중해. "
+        "하드 제약: mode=viewer에서는 '익절', '포지션 유지', '보유한 종목 관리', '보유 물량 관리' 같은 보유자 전용 표현을 절대 쓰지 마. "
+        "하드 제약: mode=holder에서는 '신규 진입 대기', '첫 진입', '처음 진입'처럼 미보유자 관점 코칭을 절대 쓰지 마. "
         "내부 변수명이나 영어 필드명(예: sharp_drop, activeSupport, reclaimLevel, breakoutLevel, trendState)은 절대 그대로 노출하지 마. "
         "보고서체, 설명체, 체크리스트 말투 금지. 정의하듯 말하지 말고 차트를 같이 보는 대화처럼 말해. "
         "투자 성향 이름(예: 보수형/수익보호형 같은 라벨)을 문장에 드러내지 말고, 판단 기울기만 자연스럽게 녹여. "
@@ -1757,6 +1837,27 @@ def _derive_market_phase(summary: Dict[str, Any]) -> str:
     return "mixed_transition_zone"
 
 
+def _derive_momentum_phase(summary: Dict[str, Any]) -> str:
+    trend_state = str(summary.get("trendState", "normal"))
+    recent_5 = float(summary.get("recentMovePercent5", 0.0) or 0.0)
+    ma20 = float(summary.get("ma20", 0.0) or 0.0)
+    ma60 = float(summary.get("ma60", 0.0) or 0.0)
+    current = float(summary.get("currentPrice", 0.0) or 0.0)
+    support_broken = bool(summary.get("supportBroken"))
+    above_medium_trend = current >= ma60 * 0.99 if ma60 > 0 else True
+    near_ma20 = abs((current - ma20) / ma20) <= 0.03 if ma20 > 0 else True
+    if (
+        trend_state == "post_rally_pullback"
+        or (recent_5 <= -1.0 and recent_5 >= -5.0 and not support_broken and above_medium_trend and near_ma20)
+    ):
+        return "post_rally_pullback"
+    if trend_state == "sharp_drop":
+        return "sharp_drop"
+    if trend_state == "sharp_rise":
+        return "sharp_rise"
+    return "normal"
+
+
 def generate_ai_opinion(
     ticker: str,
     analysis: Dict[str, Any],
@@ -1785,6 +1886,8 @@ def generate_ai_opinion(
         "supportStatus": "broken" if support_broken else "holding",
         "resistanceStatus": "broken" if resistance_broken else "intact",
         "marketPhase": _derive_market_phase(summary),
+        "actionScope": "position_management_only" if has_position else "entry_timing_only",
+        "momentumPhase": _derive_momentum_phase(summary),
     }
 
     compact_payload = {
@@ -1794,6 +1897,7 @@ def generate_ai_opinion(
         "changePercent": summary["changePercent"],
         "dailyRangePercent": summary["dailyRangePercent"],
         "recentMovePercent5": summary["recentMovePercent5"],
+        "recentMovePercent20": summary.get("recentMovePercent20"),
         "trendState": summary["trendState"],
         "mode": "holder" if has_position else "viewer",
         "style": style,
@@ -1893,7 +1997,7 @@ def generate_ai_opinion(
         forbidden_tone_failed = False
 
         if parsed:
-            normalized, normalize_reason = _normalize_ai_opinion_payload(parsed)
+            normalized, normalize_reason = _normalize_ai_opinion_payload(parsed, has_position)
             if normalized:
                 elapsed = time.perf_counter() - started_at
                 logger.info("AI opinion generation succeeded in %.3fs", elapsed)
@@ -1920,7 +2024,7 @@ def generate_ai_opinion(
 
     elapsed = time.perf_counter() - started_at
     logger.warning("AI opinion fallback used after %.3fs", elapsed)
-    return _fallback_ai_opinion(summary)
+    return _fallback_ai_opinion(summary, has_position)
 
 
 @app.get("/health")
@@ -1989,7 +2093,7 @@ async def analyze(
             or not str(ai_opinion.get("summary", "")).strip()
             or not str(ai_opinion.get("commentary", "")).strip()
         ):
-            ai_opinion = _fallback_ai_opinion(analysis["summary"])
+            ai_opinion = _fallback_ai_opinion(analysis["summary"], personalization["hasPosition"])
 
         analysis["explanation"] = analysis["trendSummary"]
         analysis["lessons"] = []
