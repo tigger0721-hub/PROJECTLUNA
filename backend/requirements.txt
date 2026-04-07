@@ -8,3 +8,4 @@ python-dotenv==1.0.1
 SQLAlchemy==2.0.36
 oracledb==2.5.1
 alembic==1.14.0
+matplotlib==3.9.2

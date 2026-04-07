@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import ast
+import base64
 import json
 import logging
 import os
@@ -19,6 +20,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 
+from app.services.chart_renderer import render_analysis_chart_image
 from app.services.stock_master import lookup_stock_master_instrument
 
 app = FastAPI(title="Luna Stock Chart Tutor API")
@@ -1759,12 +1761,34 @@ def generate_ai_opinion(
     }
     user_prompt = f"입력 데이터(JSON): {json.dumps(compact_payload, ensure_ascii=False)}"
 
+    chart_image_path: Optional[Path] = None
+    image_data_uri: Optional[str] = None
+    try:
+        chart_image_path = render_analysis_chart_image(analysis, window=65)
+        if chart_image_path and chart_image_path.exists():
+            encoded = base64.b64encode(chart_image_path.read_bytes()).decode("ascii")
+            image_data_uri = f"data:image/png;base64,{encoded}"
+    except Exception as e:
+        logger.warning("Chart image rendering failed; fallback to text-only prompt: %s", e)
+
+    input_blocks: List[Dict[str, Any]] = [
+        {"type": "input_text", "text": user_prompt},
+    ]
+    if image_data_uri:
+        input_blocks.append(
+            {
+                "type": "input_text",
+                "text": "참고용 차트 이미지도 함께 본 뒤 해설해줘. 단, 숫자 기준의 JSON 입력을 1순위 근거로 쓰고 이미지는 보조 힌트로만 활용해.",
+            }
+        )
+        input_blocks.append({"type": "input_image", "image_url": image_data_uri})
+
     try:
         client = OpenAI(api_key=api_key)
         response = client.responses.create(
             model="gpt-4o-mini",
             instructions=system_prompt,
-            input=user_prompt,
+            input=[{"role": "user", "content": input_blocks}],
             text={
                 "format": {
                     "type": "json_schema",
@@ -1828,6 +1852,13 @@ def generate_ai_opinion(
     except Exception as e:
         elapsed = time.perf_counter() - started_at
         logger.exception("AI opinion generation failed in %.3fs: %s", elapsed, e)
+
+    finally:
+        if chart_image_path is not None:
+            try:
+                chart_image_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     elapsed = time.perf_counter() - started_at
     logger.warning("AI opinion fallback used after %.3fs", elapsed)
