@@ -71,6 +71,29 @@ STYLE_GUIDE = {
 }
 
 HOLDER_PROFIT_PROTECT_PNL_THRESHOLD = 4.0
+VIEWER_MODE_FORBIDDEN_PHRASES = [
+    "보유 중이면",
+    "보유중이면",
+    "보유하고 있다면",
+    "손절",
+    "익절",
+    "포지션",
+    "물량",
+    "비중 축소",
+    "부분 익절",
+    "부분익절",
+    "홀딩",
+    "축소 기준",
+]
+HOLDER_MODE_FORBIDDEN_PHRASES = [
+    "신규 진입",
+    "신규진입",
+    "첫 진입",
+    "처음 들어가는",
+    "진입해보자",
+    "들어가도 된다",
+    "매수 타이밍만 보면",
+]
 
 
 def normalize_ticker(ticker: str) -> str:
@@ -1537,7 +1560,11 @@ def _fallback_ai_opinion(summary: Dict[str, Any], personalization: Optional[Dict
             "commentary": (
                 f"아래로 밀린 뒤 반등 힘이 약해서 {reclaim_level} 회복 전에는 되돌림 매물에 눌릴 가능성이 남아 있어. "
                 f"아래에서는 {active_support} 지지 반응이 먼저 확인돼야 하고, 위에서는 {active_resistance} 근처에서 다시 막히는지 같이 체크하자. "
-                "지금 구간은 예측보다 시나리오 대응이 유리해서, 보유자는 손실 확대 방지 기준을 먼저 짧게 잡는 편이 좋아."
+                + (
+                    "지금 구간은 예측보다 시나리오 대응이 유리해서, 보유자는 손실 확대 방지 기준을 먼저 짧게 잡는 편이 좋아."
+                    if has_position
+                    else f"미보유자는 서두른 진입보다 {_viewer_risk_phrase()}을 먼저 정해두고 확인 신호가 나올 때까지 기다리는 편이 좋아."
+                )
             ),
         }
     if state == "지지 이탈 뒤 기술적 반등" and reclaim_level is not None:
@@ -1639,9 +1666,7 @@ def _fallback_ai_opinion(summary: Dict[str, Any], personalization: Optional[Dict
 
 
 def _violates_mode_guardrails(text: str, has_position: bool) -> bool:
-    viewer_forbidden = ["손절", "익절", "포지션 유지", "보유한 종목 관리", "보유 물량", "물량 관리"]
-    holder_forbidden = ["신규 진입 대기", "첫 진입", "처음 진입", "미보유자라면", "진입 대기"]
-    banned = holder_forbidden if has_position else viewer_forbidden
+    banned = HOLDER_MODE_FORBIDDEN_PHRASES if has_position else VIEWER_MODE_FORBIDDEN_PHRASES
     return any(token in text for token in banned)
 
 
