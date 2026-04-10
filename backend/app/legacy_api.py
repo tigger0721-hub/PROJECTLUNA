@@ -1777,6 +1777,9 @@ def _build_system_prompt(has_position: bool, style: str) -> str:
         "holder와 viewer를 절대 섞지 마. holder는 보유 물량 관리 중심, viewer는 진입 타이밍 중심으로만 써. "
         "viewer에서는 손절/익절/포지션 유지/보유 물량 같은 표현 금지. "
         "holder에서는 신규 진입 대기/첫 진입 같은 표현 금지. "
+        "analysisContext를 최우선 해석으로 사용하고, 원시 숫자는 근거로만 보강해. "
+        "tradeContext가 profit_zone이고 pricePosition이 near_resistance면 깊은 구조 방어보다 수익 보호 프레이밍을 우선해. "
+        "viewer 모드에서 decisionBias가 wait면 억지 진입 아이디어를 만들지 마. "
         "내부 영문 필드명은 노출하지 마. "
         f"{behavior_prompt} {style_behavior_prompt}"
     )
@@ -1904,6 +1907,106 @@ def _derive_momentum_phase(summary: Dict[str, Any]) -> str:
     return "normal"
 
 
+def _derive_analysis_context(
+    summary: Dict[str, Any],
+    personalization: Dict[str, Any],
+    derived_state: Dict[str, Any],
+    has_position: bool,
+) -> Dict[str, str]:
+    trend_state = str(summary.get("trendState", "normal"))
+    current = float(summary.get("currentPrice", 0.0) or 0.0)
+    ma20 = float(summary.get("ma20", 0.0) or 0.0)
+    ma60 = float(summary.get("ma60", 0.0) or 0.0)
+    recent_5 = float(summary.get("recentMovePercent5", 0.0) or 0.0)
+    recent_20 = float(summary.get("recentMovePercent20", 0.0) or 0.0)
+    support_broken = bool(summary.get("supportBroken"))
+    resistance_broken = bool(summary.get("resistanceBroken"))
+    price_vs_support = str(derived_state.get("priceVsActiveSupport", "near"))
+    price_vs_resistance = str(derived_state.get("priceVsActiveResistance", "near"))
+
+    if trend_state == "sharp_rise" or (current > ma20 > ma60 and (recent_20 >= 5.0 or recent_5 >= 2.0)):
+        trend_strength = "strong_up"
+    elif current >= ma20 >= ma60 and recent_20 >= 0:
+        trend_strength = "weak_up"
+    elif trend_state == "sharp_drop" or (current < ma20 < ma60 and (recent_20 <= -5.0 or recent_5 <= -2.0)):
+        trend_strength = "strong_down"
+    elif current <= ma20 <= ma60 and recent_20 <= 0:
+        trend_strength = "weak_down"
+    else:
+        trend_strength = "sideways"
+
+    if resistance_broken and price_vs_resistance == "above":
+        price_position = "breakout_above_resistance"
+    elif support_broken and price_vs_support == "below":
+        price_position = "below_support"
+    elif price_vs_resistance == "near":
+        price_position = "near_resistance"
+    elif price_vs_support == "near":
+        price_position = "near_support"
+    else:
+        price_position = "mid_range"
+
+    if resistance_broken:
+        recent_action = "breakout"
+    elif trend_state == "post_rally_pullback":
+        recent_action = "post_rally_pullback"
+    elif support_broken and recent_5 < 0:
+        recent_action = "rejection"
+    elif abs(recent_5) <= 1.0 and abs(recent_20) <= 3.0:
+        recent_action = "consolidation"
+    elif recent_5 < 0:
+        recent_action = "pullback"
+    elif recent_5 > 0 and current >= ma20:
+        recent_action = "rebound_attempt"
+    else:
+        recent_action = "consolidation"
+
+    pnl_percent = personalization.get("pnlPercent")
+    if has_position and isinstance(pnl_percent, (int, float)):
+        if pnl_percent >= HOLDER_PROFIT_PROTECT_PNL_THRESHOLD:
+            trade_context = "profit_zone"
+        elif pnl_percent <= -3.0:
+            trade_context = "loss_zone"
+        else:
+            trade_context = "neutral_zone"
+    elif has_position:
+        trade_context = "neutral_zone"
+    else:
+        trade_context = "no_position"
+
+    ma20_gap_pct = ((current - ma20) / ma20) * 100 if ma20 > 0 else 0.0
+    if recent_5 >= 4.0 or ma20_gap_pct >= 6.0:
+        extension_state = "extended_up"
+    elif recent_5 <= -4.0 or ma20_gap_pct <= -6.0:
+        extension_state = "extended_down"
+    else:
+        extension_state = "normal"
+
+    if has_position:
+        if trade_context == "profit_zone":
+            decision_bias = "protect_profit"
+        elif trade_context == "loss_zone":
+            decision_bias = "defend_loss"
+        else:
+            decision_bias = "wait"
+    else:
+        if recent_action in {"breakout", "rebound_attempt"} and trend_strength in {"strong_up", "weak_up"}:
+            decision_bias = "entry_on_confirmation"
+        elif recent_action in {"pullback", "post_rally_pullback"} and trend_strength in {"strong_up", "weak_up"}:
+            decision_bias = "split_entry_on_pullback"
+        else:
+            decision_bias = "wait"
+
+    return {
+        "trendStrength": trend_strength,
+        "pricePosition": price_position,
+        "recentAction": recent_action,
+        "tradeContext": trade_context,
+        "decisionBias": decision_bias,
+        "extensionState": extension_state,
+    }
+
+
 def generate_ai_opinion(
     ticker: str,
     analysis: Dict[str, Any],
@@ -1953,6 +2056,7 @@ def generate_ai_opinion(
     is_near_support = derived_state["priceVsActiveSupport"] == "near"
     recent_trend_label = _derive_recent_trend_label(summary, market_bias)
     setup_quality = _derive_setup_quality(summary, market_bias)
+    analysis_context = _derive_analysis_context(summary, personalization, derived_state, has_position)
 
     compact_payload = {
         "ticker": ticker.upper(),
@@ -1985,6 +2089,7 @@ def generate_ai_opinion(
         "breakoutLevel": summary.get("breakoutLevel"),
         "resistanceRole": summary.get("resistanceRole", "active_resistance"),
         "derivedState": derived_state,
+        "analysisContext": analysis_context,
         "addBuyZone": personalization["suggestedAddBuyZone"],
         "stopLine": personalization["suggestedStop"],
         "takeProfit": personalization["suggestedTakeProfit"],
