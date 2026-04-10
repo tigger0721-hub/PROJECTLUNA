@@ -1502,8 +1502,16 @@ def _fallback_ai_opinion(summary: Dict[str, Any], personalization: Optional[Dict
     in_clear_profit = bool(
         has_position and pnl_percent is not None and pnl_percent >= HOLDER_PROFIT_PROTECT_PNL_THRESHOLD
     )
+    current_price = float(summary.get("currentPrice", 0.0) or 0.0)
+    near_resistance = bool(
+        active_resistance
+        and current_price > 0
+        and abs((current_price - float(active_resistance)) / float(active_resistance)) <= 0.02
+    )
 
-    if has_position and in_clear_profit and trend_state in {"post_rally_pullback", "sharp_rise"}:
+    if has_position and in_clear_profit and (
+        trend_state in {"post_rally_pullback", "sharp_rise"} or near_resistance
+    ):
         return {
             "summary": "이미 수익권이면 깊은 지지보다 수익 보호와 상단 실패 대응을 먼저 챙기는 게 좋아.",
             "commentary": (
@@ -1670,7 +1678,39 @@ def _violates_mode_guardrails(text: str, has_position: bool) -> bool:
     return any(token in text for token in banned)
 
 
-def _normalize_ai_opinion_payload(payload: Dict[str, Any], has_position: bool) -> tuple[Optional[Dict[str, str]], Optional[str]]:
+def _extract_mentioned_target_prices(text: str) -> List[float]:
+    if not text:
+        return []
+    target_prices: List[float] = []
+    patterns = [
+        r"\$ ?(\d+(?:\.\d+)?)\s*(?:target|목표)",
+        r"(\d+(?:\.\d+)?)\s*(?:달러|원)?\s*(?:target|목표)",
+        r"(?:target|목표)\s*(?:가는?|가격)?\s*\$ ?(\d+(?:\.\d+)?)",
+    ]
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            try:
+                target_prices.append(float(match.group(1)))
+            except Exception:
+                continue
+    return target_prices
+
+
+def _has_implausible_target_wording(text: str, current_price: Optional[float]) -> bool:
+    if current_price is None or current_price <= 0:
+        return False
+    lower_bound = current_price * 0.25
+    for target in _extract_mentioned_target_prices(text):
+        if current_price >= 10 and target < lower_bound:
+            return True
+    return False
+
+
+def _normalize_ai_opinion_payload(
+    payload: Dict[str, Any],
+    has_position: bool,
+    current_price: Optional[float] = None,
+) -> tuple[Optional[Dict[str, str]], Optional[str]]:
     summary = str(payload.get("summary", "")).strip()
     commentary = str(payload.get("commentary", "")).strip()
     if not summary or not commentary:
@@ -1683,6 +1723,8 @@ def _normalize_ai_opinion_payload(payload: Dict[str, Any], has_position: bool) -
         return None, "forbidden_tone"
     if _violates_mode_guardrails(summary, has_position) or _violates_mode_guardrails(commentary, has_position):
         return None, "mode_guardrail_violation"
+    if _has_implausible_target_wording(commentary, current_price):
+        return None, "implausible_target_wording"
     return {"summary": summary, "commentary": commentary}, None
 
 
@@ -1778,6 +1820,10 @@ def _build_mode_behavior_prompt(has_position: bool) -> str:
             "holder 모드 전용으로 써. 신규 진입 코칭 금지. "
             "avgPrice 대비 손익 상태를 먼저 확정하고, 수익권/손실권 로직을 절대 섞지 마. "
             "수익권이면 이익 보호와 추세 추종(부분 익절/보유 유지)을 우선하고, 손실권이면 리스크 관리(비중 축소/손절 기준)를 우선해. "
+            "mode=holder 이고 tradeContext=profit_zone 이면 최우선 프레이밍은 반드시 수익 보호/이익 잠금이야. "
+            "특히 pricePosition=near_resistance 또는 extensionState=extended_up 이면 부분 익절/상승 시 분할 축소/잔여 물량의 타이트한 보호 기준을 먼저 제시해. "
+            "이 구간에서 깊은 지지/손절 기준은 보조 근거로만 다루고, 실제 붕괴 증거 없이는 stop-loss를 첫 문장 핵심으로 두지 마. "
+            "holder+profit_zone+near_resistance+(strong_up|weak_up) 조합은 일반 관망이 아니라 수익 관리 의사결정 구간으로 해석해. "
             "결론은 반드시 하나만 제시해: Hold position / Take partial profit / Cut loss."
         )
     return (
@@ -2125,12 +2171,25 @@ def generate_ai_opinion(
         "analysisContext": analysis_context,
         "addBuyZone": personalization["suggestedAddBuyZone"],
         "stopLine": personalization["suggestedStop"],
-        "takeProfit": personalization["suggestedTakeProfit"],
         "volumeRatio": summary["volumeRatio"],
         "ma20": summary["ma20"],
         "ma60": summary["ma60"],
         "pnlPercent": personalization["pnlPercent"],
     }
+    take_profit_raw = personalization.get("suggestedTakeProfit")
+    try:
+        take_profit_value = float(take_profit_raw)
+    except (TypeError, ValueError):
+        take_profit_value = None
+    is_valid_take_profit_price = bool(
+        take_profit_value
+        and current_price > 0
+        and take_profit_value >= current_price * 0.8
+        and take_profit_value <= current_price * 1.5
+    )
+    if is_valid_take_profit_price:
+        compact_payload["takeProfitPrice"] = round(take_profit_value, 2)
+
     user_prompt = f"입력 데이터(JSON): {json.dumps(compact_payload, ensure_ascii=False)}"
 
     chart_image_path: Optional[Path] = None
@@ -2207,7 +2266,11 @@ def generate_ai_opinion(
         forbidden_tone_failed = False
 
         if parsed:
-            normalized, normalize_reason = _normalize_ai_opinion_payload(parsed, has_position)
+            normalized, normalize_reason = _normalize_ai_opinion_payload(
+                parsed,
+                has_position,
+                current_price=current_price,
+            )
             if normalized:
                 elapsed = time.perf_counter() - started_at
                 logger.info("AI opinion generation succeeded in %.3fs", elapsed)
