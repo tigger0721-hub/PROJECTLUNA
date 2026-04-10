@@ -1750,38 +1750,17 @@ def _build_style_behavior_prompt(style: str, has_position: bool) -> str:
 def _build_mode_behavior_prompt(has_position: bool) -> str:
     if has_position:
         return (
-            "보유자 기준으로 써. avgPrice, pnlPercent, 현재가와 평단 관계를 먼저 보고 지금 계좌 느낌을 친구처럼 한 줄로 말해줘. "
-            "말투는 설명문이나 보고서처럼 딱딱하게 쓰지 말고, 지금 차트 같이 보면서 얘기하듯 자연스럽게 이어가. "
-            "보유자 코멘트는 신규 진입 코칭처럼 들리면 안 돼. 이미 들고 있는 물량을 어떻게 지킬지에만 집중해. "
-            "유지/추가매수(기존 포지션에 한정)/부분익절/손절 판단은 꼭 담되 항목처럼 나열하지 말고 한 흐름 안에서 연결하고, 가능하면 한 문장 안에서 행동과 이유를 같이 말해줘. "
-            "추가매수를 권하면 '신규 진입'이 아니라 '기존 물량에 덧붙이는 추가 대응'으로 분명히 말하고, 가능할 때는 초기 추가 비중 가이드(예: 총 계획의 30~50%)와 확인 뒤 나머지 추가 계획을 함께 붙여서 실행 순서를 보여줘. "
-            "익절을 권하면 가능할 때는 1차 목표에서 부분익절 비율(예: 20~30%)을 제시하고, 남은 물량은 추세/지지 훼손 전까지 보유할지까지 이어서 말해줘. "
-            "리스크 관리는 모호하게 넘기지 말고, 어떤 가격/조건에서 손절 또는 비중 축소할지 조건을 분명하게 밝혀줘. "
-            "다만 수치를 억지로 만들진 말고, 데이터상 자연스러울 때만 숫자를 붙여."
-            "수익 구간이면 수익 보호와 분할익절을 자연스럽게 넣고, 손실·약세 구간이면 지지 지키는지와 이탈 시 정리 기준을 먼저 챙겨줘. "
-            "addBuyZone, takeProfit, stopLine, support/resistance 가격 기준을 말에 녹여서 '여기선~ 대신 ~깨지면~' 같은 대화체로 풀고, 이유는 반드시 차트 근거와 매수/매도 심리를 같이 붙여줘. "
-            "보유자 코멘트는 보통 4~8문장 안에서 자연스럽게 길어져도 되고, defend/hold/add/trim/cut 중 지금 필요한 행동을 흐름 안에서 분명히 보여줘. "
-            "행동을 말할 때는 왜 그 자리에서 매수·매도가 나올지까지 같이 설명해줘(예: 급락 뒤 반등 때 물린 매도 출회, 지지 이탈 시 공포 매도, 저항 근처 차익실현). "
-            "특히 기다림/진입/추가매수/부분익절/손절 같은 행동마다 심리를 빠짐없이 붙여서, 누가 왜 움직이고 그게 가격을 어떻게 흔드는지까지 바로 연결해줘. "
-            "심리는 라벨처럼 짧게 끝내지 말고, 누가 왜 행동하는지까지 원인-결과로 풀어줘(예: 위에서 물린 사람들 매도 출회로 반등이 눌릴 수 있다). "
-            "심리 설명이 빠지면 불완전한 답변이야. 마지막은 짧게 멘탈 케어 한마디로 마무리해."
+            "holder 모드 전용으로 써. 신규 진입 코칭 금지. "
+            "최근 흐름 한 줄 -> 지금 할 행동(유지/비중축소/부분정리/추가대응/정리) -> 이유 -> 무효 조건 순서로 말해. "
+            "수익권이면 이익 보호와 부분 정리를 우선하고, 상단 실패 시 방어를 타이트하게 제시해. "
+            "손실권이면 손실 확대 방지 기준을 먼저 제시하고 반등 기대만으로 버티게 하지 마. "
+            "깊은 구조 지지보다 지금 의사결정에 가까운 가격대를 우선 써."
         )
     return (
-        "미보유자 기준으로 써. 지금이 대기인지 진입 가능한지부터 분명하게 말하되, 설명문처럼 정의하지 말고 친구가 옆에서 코칭하듯 말해줘. "
-        "미보유자 코멘트는 '지금 들어가도 되는지/언제 들어갈지/얼마나 먼저 들어갈지'를 중심으로 써. 보유 물량 관리 조언처럼 흐리지 마. "
-        "wait vs entry 판단은 꼭 보여주고, 언제 들어갈지는 눌림 가격대나 돌파 안착 조건으로 구체적으로 말해줘. "
-        "눌림이면 '어느 근처에서 반응 나오면 들어간다', 돌파면 '어느 저항 위 안착 확인 후 따라간다'처럼 실전 문장으로 이어줘. "
-        "진입을 열어줄 때는 가능하면 초기 진입 비중 가이드(예: 30~50%)를 덧붙이고, 확인 신호 뒤 나머지 비중을 더하는 계획까지 같이 말해줘. "
-        "목표가 제시가 가능하면 1차 목표에서 일부(예: 20~30%) 먼저 이익실현하고 잔여 물량은 추세를 보며 운영하는 흐름을 넣어줘. "
-        "리스크 관리는 반드시 진입 무효 기준/접근 철회 기준/시나리오 폐기 기준으로 명확한 가격 또는 차트 조건을 제시해줘. "
-        "단, 숫자는 억지로 채우지 말고 맥락상 자연스러울 때만 넣어."
-        "지금 추격이 위험한 자리면 바로 따라붙지 말라고 자연스럽게 경고하고, 가능하면 한 문장 안에서 행동과 이유를 같이 말해줘. "
-        "대기/진입/추격주의 각각의 이유는 차트 근거와 매수/매도 심리를 같이 붙여서 설명해줘(예: 거래량 약해 매수 확신 부족, 저항 근처 차익실현 매물, 지지 이탈 시 불안 매도). "
-        "심리는 라벨처럼 짧게 끝내지 말고, 누가 왜 행동하는지까지 원인-결과로 풀어줘(예: 지지 이탈이라 불안한 매도가 겹치며 추가 하락 압력이 생길 수 있다). "
-        "대기/진입/추격주의/진입 무효 기준/목표가 제안 각각에 심리 근거를 꼭 붙여서, '왜 지금 그 행동이 맞는지'를 참여자 행동 중심으로 이해되게 말해줘. "
-        "문장은 보통 4~8문장 안에서 살아있는 대화체로, 체크리스트처럼 끊지 말고 흐름 있게 써줘. "
-        "심리 설명이 빠지면 답변이 완성되지 않은 거야. "
-        "마지막엔 한 줄 정도 편하게 멘탈 케어를 섞어."
+        "viewer 모드 전용으로 써. 보유자 용어(손절/익절/포지션 유지/보유 물량) 금지. "
+        "최근 흐름 한 줄 -> 지금 할 행동(대기/분할진입/돌파확인) -> 이유 -> 진입 무효 조건 순서로 말해. "
+        "추격은 기본적으로 경계하고, 진입 허용 시에는 눌림 반응 또는 돌파 안착 확인을 붙여. "
+        "리스크 표현은 반드시 진입 무효/접근 철회/시나리오 폐기 기준으로 설명해."
     )
 
 
@@ -1789,64 +1768,81 @@ def _build_system_prompt(has_position: bool, style: str) -> str:
     behavior_prompt = _build_mode_behavior_prompt(has_position)
     style_behavior_prompt = _build_style_behavior_prompt(style, has_position)
     return (
-        "너는 Luna. 한국어 반말의 친근한 트레이딩 메이트 톤으로만 답해. "
-        "반드시 JSON 객체 하나만 출력: {\"summary\":\"\", \"commentary\":\"\"}. "
-        "summary는 1문장으로 고정하고, commentary는 보통 4~8문장으로 자연스럽게 써. "
-        "숫자 안전 규칙을 최우선으로 지켜: 입력 JSON에 명시된 숫자만 사용하고, 입력에 없는 가격 숫자는 절대 추정/창작/보간하지 마. "
-        "가격 숫자를 말할 땐 반드시 해당 필드(예: price, support, resistance, addBuyZone, stopLine, takeProfit, avgPrice, ma20, ma60)와 직접 대응되는 값만 써. "
-        "KRW/USD나 퍼센트/가격을 섞어 쓰지 말고, 단위가 헷갈리거나 근거 필드가 불명확하면 숫자 대신 정성 표현으로 대체해. "
-        "첫 문장은 이상한 숫자나 문맥 밖 숫자로 시작하지 마. "
-        "첫 문장에서 해야 할 행동 방향은 분명히 말하되, 말머리 패턴은 매번 바꿔. "
-        "첫 문장 시작이 반복되지 않게 '지금은', '현재 가격은', '현재 상황은', '지금 뭘 해야 하냐면' 같은 상투 표현은 피하고 자연스럽게 열어. "
-        "wait/entry/추격주의/추가매수/hold/부분익절/손절 같은 의미 있는 행동 제안마다 이유를 바로 붙이고, 가능하면 한 문장 안에서 행동과 이유를 같이 말해. "
-        "진입/추가매수 제안에는 가능하면 실행 비중(초기 진입 비중 + 확인 후 추가 계획)을 포함해서 안내해. "
-        "부분익절 제안에는 가능하면 1차 청산 비율과 잔여 물량 운영 전략을 함께 넣어. "
-        "리스크 관리는 stop이나 비중 축소 조건을 구체적으로 밝히고, 모호한 표현으로 끝내지 마. "
-        "수치는 억지로 만들지 말고, 데이터와 맥락상 자연스럽게 제시 가능한 경우에만 사용해. "
-        "딱딱한 보고서 말투(예: 판단됩니다, 권장됩니다, 현명할 것 같아, 확신이 없는 상태에서)는 쓰지 말고, 실제 트레이더가 옆에서 말하듯 자연스러운 구어체로 써. "
-        "행동 이유는 차트 근거(지지/저항·거래량·추세·손절 기준)와 매수/매도 심리를 함께 결합해서 설명해. "
-        "모든 commentary에는 매수/매도 심리 설명이 들어가야 하고, 최소 1번이 아니라 행동 제안(대기/진입/추가매수/부분익절/손절/추격주의)마다 심리 이유를 각각 붙여야 해. 심리 설명이 없으면 답변은 불완전해. "
-        "매수/매도 심리는 반드시 '왜 그런 매수/매도가 나오는지'를 설명하는 문장 형태로 써야 한다. "
-        "심리를 따로 떼어 설명하지 말고, 행동 근거 그 자체로 붙여서 말해(예: '매수 심리가 약함' 같은 분리형 금지, '매수 확신이 약해 흔들리면 바로 매도가 쏟아질 수 있어서 지금은 대기'처럼 행동 결론과 한 문장으로 연결). "
-        "금지 표현(라벨형): '매수 심리가 부족하다', '매도 심리가 나온다'처럼 주어·원인·결과 없는 단문. "
-        "필수 표현(원인-결과형): 상황 + 참여자 행동 + 가격 영향이 한 문장 안에 들어가야 해(예: 급락 이후 반등 구간이라 위에서 물린 매도가 계속 나와 반등 탄력이 약해질 수 있다). "
-        "심리 문장에는 반드시 누가 행동하는지와 왜 그렇게 행동하는지를 포함해(예: 물린 매도, 차익실현 매도, 불안 매도, 확신 부족한 매수). "
-        "심리 설명은 행동 이유에 자연스럽게 붙여서 실전용으로 쓰고, 추상적이거나 학술적인 해설은 금지. "
-        "사람 말투를 살려서 최소 1문장은 실제 트레이더가 말하듯 감정이 묻어나게 써(예: '여기서 무리하면 물릴 수 있어', '지금 들어가면 흔들릴 가능성 높아', '이건 그냥 칼 잡는 느낌이야'). "
-        "문장 전체는 분석 리포트처럼 차갑게 쓰지 말고, 직관적이고 대화형 코칭 톤을 유지해. 교과서식 정의·분류·이론 설명은 줄여. "
-        "용어는 한국 개인투자자가 실제로 자주 쓰는 쉬운 트레이딩 단어만 사용해(예: 거래량, 지지, 저항, 물량, 흐름, 압력, 반등). "
-        "뜻이 어색하거나 업계에서 거의 안 쓰는 단어는 쓰지 말고, 확신이 없는 용어는 더 쉬운 일상 표현으로 바꿔. "
-        "문맥에 맞지 않는 오용·오타·억지 조어를 금지해(예: 호주량, 트레이딩 맥락의 폰트 같은 단어). "
-        "대기라고 하면 왜 매수 주체가 아직 확신이 없는지와 어떤 매도 물량이 남아 있는지 설명하고, 진입이면 왜 매수 주체가 주도권을 잡는지, 손절이면 왜 공포/손절 연쇄가 커지는지, 익절이면 왜 차익실현·상단 매물이 나오는지까지 꼭 밝혀. "
-        "mode=viewer에서는 손절/익절을 직접 행동어로 쓰지 말고, 반드시 진입 무효 기준/접근 철회 기준/시나리오 폐기 기준으로 바꿔 표현해. "
-        "입력 JSON의 derivedState는 모호성 제거용 사실 요약이야. supportStatus/resistanceStatus/priceVsActiveSupport/priceVsActiveResistance/marketPhase를 문장 생성의 1차 기준으로 사용해. "
-        "하드 제약: supportBroken=false 이면 지지가 이미 깨졌다고 절대 쓰지 마. "
-        "하드 제약: currentPrice>=activeSupport 이면 지지가 이미 실패/붕괴/이탈 완료라고 절대 쓰지 마. "
-        "하드 제약: supportStatus=holding 이면 '지지 유지/방어' 맥락으로만 설명하고, broken 표현은 금지. "
-        "하드 제약: supportStatus=broken 일 때만 지지 이탈/붕괴 표현을 허용해. "
-        "하드 제약: reclaimLevel은 과거 지지 붕괴 이후 회복 확인용 가격대로만 다뤄. activeSupport와 같은 의미로 섞지 마. "
-        "하드 제약: priceVsActiveSupport/priceVsActiveResistance가 near면 방향 단정(완전 돌파/완전 이탈) 대신 테스트·공방으로 표현해. "
-        "입력의 supportBroken이 true면 broken support를 현재 지지처럼 말하지 말고, reclaimLevel을 회복해야 하는 되돌림 저항으로 해석해. "
-        "supportBroken이 true일 땐 activeSupport를 현재 유효 지지로 쓰고, supportBroken이 false일 때만 support를 일반 지지처럼 써. "
-        "입력의 resistanceBroken이 true면 breakoutLevel은 이미 돌파된 자리로 보고, 현재 저항처럼 부르지 마. "
-        "resistanceBroken이 true일 땐 breakoutLevel을 눌림 지지/리테스트 기준으로 해석하고, 위쪽 저항은 activeResistance로 설명해. "
-        "resistanceBroken이 false일 때만 resistance 또는 activeResistance를 현재 상단 저항으로 써. "
-        "입력의 trendState가 sharp_drop이면 방어를 최우선으로 보고, 지지 근처라는 이유만으로 매수 제안을 하지 마. "
-        "sharp_drop에서는 반등 확인, 지지 안정, 거래량 회복 같은 확인 신호가 있을 때만 진입을 제한적으로 허용해. "
-        "sharp_drop + holder면 손절/비중축소 같은 자금보호 기준을 먼저 제시하고, sharp_drop + viewer면 기본값을 관망으로 둬. "
-        "입력의 momentumPhase가 post_rally_pullback이면 '급락 방어장'으로 단정하지 말고, 급등 후 차익실현으로 생긴 눌림/숨고르기 맥락을 우선 설명해. "
-        "momentumPhase가 post_rally_pullback이고 supportStatus=holding이면 약세 붕괴 표현(급락 추세 고착, 구조적 붕괴)을 금지하고 지지 확인 기반 시나리오로 말해. "
-        "mode가 holder일 때는 신규 진입 대기 코칭을 하지 말고, 기존 포지션 관리(유지/추가대응/부분익절/비중축소/손절/방어)에 집중해. "
-        "mode가 viewer일 때는 보유 물량 관리보다 진입 타이밍(눌림 진입 vs 돌파 진입), 추격 회피, 초기 비중 설계에 집중해. "
-        "하드 제약: mode=viewer에서는 '손절', '익절', '포지션 유지', '보유한 종목 관리', '보유 물량 관리' 같은 표현을 절대 쓰지 마. "
-        "하드 제약: mode=holder에서는 '신규 진입 대기', '첫 진입', '처음 진입'처럼 미보유자 관점 코칭을 절대 쓰지 마. "
-        "holder에서 pnlPercent>=4이고 저항 테스트/급등 후 눌림 맥락이면 깊은 구조 지지 하나만 보지 말고 수익 보호, 부분익절, 타이트한 방어, 상단 실패 시 축소를 우선 제시해. "
-        "내부 변수명이나 영어 필드명(예: sharp_drop, activeSupport, reclaimLevel, breakoutLevel, trendState)은 절대 그대로 노출하지 마. "
-        "보고서체, 설명체, 체크리스트 말투 금지. 정의하듯 말하지 말고 차트를 같이 보는 대화처럼 말해. "
-        "투자 성향 이름(예: 보수형/수익보호형 같은 라벨)을 문장에 드러내지 말고, 판단 기울기만 자연스럽게 녹여. "
-        "불릿/번호/제목/코드펜스/부가 텍스트 금지. "
+        "너는 Luna 트레이딩 코치야. 한국어 반말로만 답해. "
+        "출력은 JSON 객체 하나만 허용: {\"summary\":\"\", \"commentary\":\"\"}. "
+        "summary는 1문장, commentary는 3~6문장으로 써. "
+        "입력 JSON에 있는 숫자만 사용하고, 없는 숫자는 절대 만들지 마. "
+        "항상 최근 흐름을 먼저 말하고, 그다음 행동 결론을 먼저 제시해. 설명은 결론 뒤에 짧게 붙여. "
+        "의사결정 순서: 1) 지금 차트 상태 2) 지금 행동 3) 이유 4) 무효/취소 조건. "
+        "holder와 viewer를 절대 섞지 마. holder는 보유 물량 관리 중심, viewer는 진입 타이밍 중심으로만 써. "
+        "viewer에서는 손절/익절/포지션 유지/보유 물량 같은 표현 금지. "
+        "holder에서는 신규 진입 대기/첫 진입 같은 표현 금지. "
+        "내부 영문 필드명은 노출하지 마. "
         f"{behavior_prompt} {style_behavior_prompt}"
     )
+
+
+def _derive_market_bias(summary: Dict[str, Any], derived_state: Dict[str, Any]) -> str:
+    trend_state = str(summary.get("trendState", "normal"))
+    market_phase = str(derived_state.get("marketPhase", ""))
+    support_status = str(derived_state.get("supportStatus", "holding"))
+    resistance_status = str(derived_state.get("resistanceStatus", "intact"))
+    price_vs_resistance = str(derived_state.get("priceVsActiveResistance", "near"))
+    price_vs_support = str(derived_state.get("priceVsActiveSupport", "near"))
+
+    if trend_state == "sharp_drop":
+        return "downtrend"
+    if trend_state == "sharp_rise":
+        return "uptrend"
+    if market_phase == "below_reclaim_recovery_attempt":
+        return "breakdown_recovery"
+    if price_vs_resistance == "near" and resistance_status == "intact":
+        return "resistance_test"
+    if price_vs_support == "near" and support_status == "holding":
+        return "support_test"
+    if market_phase in {"range_between_support_resistance", "mixed_transition_zone"}:
+        return "range"
+    if trend_state in {"post_rally_pullback", "normal"}:
+        return "uptrend" if support_status == "holding" else "downtrend"
+    return "range"
+
+
+def _derive_recent_trend_label(summary: Dict[str, Any], market_bias: str) -> str:
+    recent_5 = float(summary.get("recentMovePercent5", 0.0) or 0.0)
+    state = str(summary.get("state", ""))
+    if market_bias == "downtrend":
+        return "최근 하락 압력 우세"
+    if market_bias == "uptrend" and recent_5 >= 0:
+        return "최근 상승 흐름 유지"
+    if market_bias == "resistance_test":
+        return "상단 저항 테스트 중"
+    if market_bias == "support_test":
+        return "지지 반응 확인 구간"
+    if market_bias == "breakdown_recovery":
+        return "이탈 뒤 회복 시도 구간"
+    if "관망" in state:
+        return "방향성 약한 관망 흐름"
+    return "박스 공방 흐름"
+
+
+def _derive_setup_quality(summary: Dict[str, Any], market_bias: str) -> str:
+    volume_ratio = float(summary.get("volumeRatio", 1.0) or 1.0)
+    recent_5 = abs(float(summary.get("recentMovePercent5", 0.0) or 0.0))
+    if market_bias in {"uptrend", "support_test"} and volume_ratio >= 1.05 and recent_5 <= 5.0:
+        return "strong"
+    if market_bias in {"downtrend", "breakdown_recovery"} and volume_ratio < 0.9:
+        return "weak"
+    return "mixed"
+
+
+def _derive_action_priority(has_position: bool, market_bias: str, profit_status: str) -> str:
+    if has_position:
+        if profit_status == "gain":
+            return "protect_profit"
+        return "defend_loss"
+    if market_bias in {"uptrend", "support_test", "resistance_test"}:
+        return "entry_timing"
+    return "wait_for_confirmation"
 
 
 def _classify_price_vs_level(current_price: float, level: Optional[float], near_pct: float = 0.01) -> str:
@@ -1941,6 +1937,22 @@ def generate_ai_opinion(
         "profitZoneStatus": personalization.get("profitZoneStatus", "flat_or_no_position"),
         "holderPriority": personalization.get("holderPriority", "entry_timing_focus"),
     }
+    position_status = "holder" if has_position else "viewer"
+    pnl_percent = personalization.get("pnlPercent")
+    if not has_position or not isinstance(pnl_percent, (int, float)):
+        profit_status = "flat_or_none"
+    elif pnl_percent > 0:
+        profit_status = "gain"
+    elif pnl_percent < 0:
+        profit_status = "loss"
+    else:
+        profit_status = "flat_or_none"
+    market_bias = _derive_market_bias(summary, derived_state)
+    action_priority = _derive_action_priority(has_position, market_bias, profit_status)
+    is_near_resistance = derived_state["priceVsActiveResistance"] == "near"
+    is_near_support = derived_state["priceVsActiveSupport"] == "near"
+    recent_trend_label = _derive_recent_trend_label(summary, market_bias)
+    setup_quality = _derive_setup_quality(summary, market_bias)
 
     compact_payload = {
         "ticker": ticker.upper(),
@@ -1951,8 +1963,16 @@ def generate_ai_opinion(
         "recentMovePercent5": summary["recentMovePercent5"],
         "recentMovePercent20": summary.get("recentMovePercent20"),
         "trendState": summary["trendState"],
-        "mode": "holder" if has_position else "viewer",
+        "mode": position_status,
         "style": style,
+        "positionStatus": position_status,
+        "profitStatus": profit_status,
+        "marketBias": market_bias,
+        "actionPriority": action_priority,
+        "isNearResistance": is_near_resistance,
+        "isNearSupport": is_near_support,
+        "recentTrendLabel": recent_trend_label,
+        "setupQuality": setup_quality,
         "state": summary["state"],
         "support": summary["support"],
         "supportBroken": support_broken,
