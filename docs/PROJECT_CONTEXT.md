@@ -1,6 +1,23 @@
 # PROJECTLUNA Project Context
 
-## 1. Purpose
+## 1. Document Role
+
+This document records the current product and implementation context as of 2026-06-18.
+
+Its role is to help contributors understand the current PROJECTLUNA implementation, the product direction already visible in the codebase, and the gaps that remain between the MVP and the intended AI trading coach experience.
+
+This document is intentionally focused on current state and gap analysis.
+
+Related documents:
+
+- `PRD.md`: V1 requirements and acceptance criteria
+- `ROADMAP.md`: priorities and staged development direction
+- `LUNA_PHILOSOPHY.md`: stable product philosophy and response principles
+- `QA_CRITERIA.md`: release gate and response-quality test scenarios
+
+The docs folder contains the product documentation baseline for PROJECTLUNA.
+
+## 2. Product Context
 
 PROJECTLUNA is being developed as an AI trading coach service.
 
@@ -20,27 +37,26 @@ The core product direction is:
 > PROJECTLUNA is not an AI that explains charts.  
 > PROJECTLUNA is an AI trading coach that helps users make better decisions.
 
-## 2. Current Repository State
+## 3. Repository State
 
 Repository checked:
 
 - GitHub repository: https://github.com/tigger0721-hub/PROJECTLUNA
-- Branch observed: `main`
+- Branch observed for this context: `main`
 - Repository visibility: public
 - Current top-level structure:
   - `backend`
   - `frontend`
+  - `docs`
   - `.gitignore`
   - `setup.sh`
   - `update_luna_tone_and_white_theme.py`
 
-At the time of review, the repository is structured as a frontend/backend MVP rather than a documentation-heavy product repository.
+The repository is structured as a frontend/backend MVP with a product documentation baseline under `docs/`.
 
-There is no clear `docs` folder visible from the repository root yet. These documents are intended to become the initial product documentation set under `docs/`.
+## 4. Current Technical Structure
 
-## 3. Current Technical Structure
-
-### 3.1 Backend
+### 4.1 Backend
 
 The backend is organized under `backend/app`.
 
@@ -60,10 +76,10 @@ Important backend responsibilities currently visible:
 - FastAPI app
 - `/health` endpoint
 - `/api/analyze` endpoint
-- ticker/instrument resolution
+- ticker and instrument resolution
 - Korean and US stock support
 - price data fetching
-- chart/price analysis
+- chart and price analysis
 - personalization logic
 - AI opinion generation
 - fallback AI opinion handling
@@ -75,9 +91,9 @@ The backend app title currently indicates an older framing:
 
 > `Luna Stock Chart Tutor API`
 
-This title reflects the older “chart tutor / chart explanation” framing and should eventually be renamed to match the AI trading coach direction.
+This title reflects the older chart tutor / chart explanation framing and should eventually be renamed to match the AI trading coach direction.
 
-### 3.2 Backend Services
+### 4.2 Backend Services
 
 Observed backend service files:
 
@@ -91,13 +107,13 @@ The services layer currently supports:
 
 This is a useful foundation, but product logic still appears concentrated in `legacy_api.py`.
 
-### 3.3 Backend Tests
+### 4.3 Backend Tests
 
 Observed backend test file:
 
 - `backend/tests/test_realtime_summary.py`
 
-Current test coverage appears narrow relative to the product quality needs of PROJECTLUNA.
+Current test coverage appears narrow relative to PROJECTLUNA's product quality needs.
 
 The most important missing QA coverage is not only technical correctness, but coaching quality:
 
@@ -106,10 +122,11 @@ The most important missing QA coverage is not only technical correctness, but co
 - fallback response quality
 - conclusion-first structure
 - actionability
-- psychological coaching
+- psychology-aware coaching
 - avoidance of generic chart narration
+- re-check condition quality
 
-### 3.4 Frontend
+### 4.4 Frontend
 
 The frontend is organized under `frontend/app` and `frontend/components`.
 
@@ -136,15 +153,15 @@ The frontend currently supports a basic MVP flow:
 7. Backend returns chart analysis, personalization, state hint, and AI opinion.
 8. Result screen displays chart, technical summary, and LUNA commentary.
 
-## 4. Current User Flow
+## 5. Current User Flow
 
-### 4.1 Input Screen
+### 5.1 Input Screen
 
 The current input screen is still framed as:
 
 > 루나 차트 해설 MVP
 
-This is a product-positioning problem.
+This is a product-positioning gap.
 
 Even though backend logic is already moving toward coaching, the frontend still introduces the product as a chart explanation MVP.
 
@@ -159,7 +176,7 @@ Current input fields include:
 
 This is directionally correct because it collects the minimum context needed to separate holder and viewer decisions.
 
-### 4.2 Result Screen
+### 5.2 Result Screen
 
 The result screen currently includes:
 
@@ -183,13 +200,13 @@ These labels are not wrong, but they understate PROJECTLUNA's intended value. Th
 - `보유자 대응`
 - `관망자 대응`
 - `수익 보호 체크`
-- `기다릴 조건`
+- `다시 볼 조건`
 
-## 5. Current Backend Product Logic
+## 6. Current Backend Product Logic
 
 The backend already contains several product-aligned elements.
 
-### 5.1 Holder and Viewer Mode
+### 6.1 Holder and Viewer Mode
 
 The `/api/analyze` endpoint accepts:
 
@@ -207,9 +224,9 @@ The `mode` is validated as either:
 
 For holder mode, average price and quantity are required.
 
-This is highly aligned with PROJECTLUNA's core philosophy because holder and viewer decisions should not be mixed.
+This is aligned with PROJECTLUNA's core philosophy because holder and viewer decisions should not be mixed.
 
-### 5.2 Investment Style
+### 6.2 Investment Style
 
 The backend currently includes styles such as:
 
@@ -224,19 +241,17 @@ This is useful, but should remain secondary to the user's current position state
 
 Style should modify guidance tone and risk posture, not override the core decision logic.
 
-### 5.3 Profit-Zone Awareness
+### 6.3 Profit-Zone Awareness
 
 The backend includes logic for profit-zone handling.
 
 The current direction already recognizes that holder users in profit require different guidance than generic holders.
 
-This is one of the most important product assets in the current implementation.
-
-For PROJECTLUNA, a profit-zone holder should not be treated as a generic “hold or sell” user. The correct framing is:
+For PROJECTLUNA, a profit-zone holder should not be treated as a generic hold-or-sell user. The correct framing is:
 
 > protect profit first, then consider upside.
 
-### 5.4 Prompt Guardrails
+### 6.4 Prompt Guardrails
 
 The backend prompt already contains important behavior rules:
 
@@ -244,19 +259,28 @@ The backend prompt already contains important behavior rules:
 - viewer should focus on entry timing
 - holder should focus on position management
 - profit-zone should prioritize profit protection
-- resistance / extension should trigger decision-zone framing
-- final answer should end with a single action conclusion
+- resistance or extension should trigger decision-zone framing
 - internal field names should not be exposed
 
-This is directionally excellent.
+The default response structure should be:
 
-However, the product surface has not fully caught up with this backend intent.
+1. Conclusion
+2. Reason
+3. Action
+4. Re-check Condition
 
-## 6. Current Product Gap
+In user-facing Korean, this maps to:
+
+1. 결론
+2. 이유
+3. 행동
+4. 다시 볼 조건
+
+## 7. Current Product Gap
 
 The current implementation is stronger in backend intent than frontend positioning.
 
-### What is already aligned
+Already aligned:
 
 - holder/viewer mode exists
 - holder inputs exist
@@ -267,18 +291,17 @@ The current implementation is stronger in backend intent than frontend positioni
 - result page has LUNA character tone
 - chart and AI commentary are integrated
 
-### What is not yet aligned
+Not yet fully aligned:
 
 - homepage still says chart explanation MVP
 - result page foregrounds technical summary
 - LUNA guidance is in a bottom sheet rather than the main decision surface
-- current UI does not strongly show conclusion → reason → action
+- current UI does not strongly show conclusion, reason, action, and re-check condition
 - action coaching is not yet visually separated
 - QA coverage does not yet reflect product philosophy
-- documentation does not yet anchor product decisions
 - PC dashboard direction is not yet visible in the current UI
 
-## 7. Product Interpretation
+## 8. Product Interpretation
 
 The repository currently represents a working MVP of an AI-assisted stock chart analysis service with early trading coach logic.
 
@@ -294,9 +317,9 @@ That means:
 - make profit-zone guidance more prominent
 - make fallback responses useful rather than generic
 - QA every response against coaching principles
-- move product rules from implicit prompt behavior into explicit product documentation
+- make product rules explicit in documentation and tests
 
-## 8. Source References
+## 9. Source References
 
 Repository and implementation references checked:
 
@@ -317,7 +340,7 @@ Repository and implementation references checked:
 
 ## Version
 
-v0.1
+v0.2
 
 ## Owner
 
