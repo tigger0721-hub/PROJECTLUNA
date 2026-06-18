@@ -1,6 +1,6 @@
 # PROJECTLUNA Deployment Runbook
 
-## Document Metadata
+## Metadata
 
 - Last verified: 2026-06-18 KST
 - Owner: PROJECTLUNA
@@ -17,173 +17,162 @@
 
 ## Purpose
 
-This document is the production deployment and recovery runbook for PROJECTLUNA.
+This document is the production deployment and disaster recovery runbook for PROJECTLUNA.
 
-The goal is to restore the service quickly when the Oracle VM, boot volume, database, PM2 process, Nginx, firewall, or public access path fails.
+Use this document when the public service URL is unavailable, PM2 processes are stopped, Nginx is failing, the Oracle Autonomous Database is stopped, or firewall rules block public access.
 
-This runbook is based on the production recovery completed on 2026-06-18.
+## Current Architecture
 
-## Current Production Architecture
+PROJECTLUNA runs on Oracle Cloud Infrastructure.
 
-PROJECTLUNA currently runs on Oracle Cloud Infrastructure.
+```text
+Browser
+  -> http://168.107.9.177
+  -> Oracle VM
+  -> iptables TCP 80
+  -> Nginx
+  -> Next.js frontend on port 3000
+  -> FastAPI backend on port 8000
+  -> Oracle Autonomous Database projectluna-db
+```
 
 Production components:
 
 - Oracle VM
-- Existing PROJECT-LUNA Boot Volume
-- Oracle Autonomous Database
+- PROJECT-LUNA Boot Volume
+- Oracle Autonomous Database projectluna-db
 - Nginx
 - PM2
-- FastAPI backend
 - Next.js frontend
+- FastAPI backend
 
-Runtime flow:
+## Server Paths
 
-```text
-User browser
-  -> http://168.107.9.177
-  -> OCI public network
-  -> VM iptables port 80
-  -> Nginx
-  -> Frontend: luna-frontend
-  -> Backend: luna-backend
-  -> Oracle Autonomous Database: projectluna-db
-```
-
-## Directory Layout
-
-Production application directory:
+Production root:
 
 ```text
 /home/ubuntu/stock-chart-tutor
 ```
 
-Development application directory:
+Development root:
 
 ```text
 /home/ubuntu/stock-chart-tutor-dev
 ```
 
-Production backend directory:
+Backend directory:
 
 ```text
 /home/ubuntu/stock-chart-tutor/backend
 ```
 
-Production frontend directory:
+Frontend directory:
 
 ```text
 /home/ubuntu/stock-chart-tutor/frontend
 ```
 
-Production backend virtual environment:
+Backend virtual environment:
 
 ```text
 /home/ubuntu/stock-chart-tutor/backend/.venv
 ```
 
-Production Oracle wallet directory:
+Oracle wallet directory:
 
 ```text
 /home/ubuntu/stock-chart-tutor/backend/wallet
 ```
 
-## PM2 Process Model
+## PM2 Processes
 
-### Required Production Processes
-
-The following PM2 processes are required for production operation:
+Required production processes:
 
 ```text
 luna-frontend
 luna-backend
 ```
 
-### Development Process
-
-The following process is a development frontend process:
+Development process:
 
 ```text
 luna-frontend-dev
 ```
 
-### Removed Process
-
-The following process was removed because it caused an operational issue:
+Removed process:
 
 ```text
 luna-backend-dev
 ```
 
-Do not include `luna-backend-dev` as a required production process.
+`luna-backend-dev` was removed because it caused an operational incident. Do not restore it as a required production process.
 
 ## PM2 Operations
 
-List all processes:
+List processes:
 
 ```bash
 pm2 list
 ```
 
-Check production frontend status:
+Check production status:
 
 ```bash
 pm2 status luna-frontend
-```
-
-Check production backend status:
-
-```bash
 pm2 status luna-backend
 ```
 
-Check production frontend logs:
+Read recent logs:
 
 ```bash
 pm2 logs luna-frontend --lines 100
-```
-
-Check production backend logs:
-
-```bash
 pm2 logs luna-backend --lines 100
 ```
 
-Restart production frontend:
+Restart production processes:
 
 ```bash
 pm2 restart luna-frontend
-```
-
-Restart production backend:
-
-```bash
 pm2 restart luna-backend
-```
-
-Restart all required production processes:
-
-```bash
 pm2 restart luna-frontend luna-backend
 ```
 
-Save PM2 process list:
+Save and restore PM2 process list:
+
+```bash
+pm2 save
+pm2 resurrect
+```
+
+## PM2 Process Recreation
+
+Use these commands only if PM2 processes are missing from `pm2 list`.
+
+Recreate production backend:
+
+```bash
+cd /home/ubuntu/stock-chart-tutor/backend
+pm2 start "bash -lc 'source .venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000'" --name luna-backend
+```
+
+Recreate production frontend:
+
+```bash
+cd /home/ubuntu/stock-chart-tutor/frontend
+pm2 start "npm run start" --name luna-frontend
+```
+
+Save recreated process list:
 
 ```bash
 pm2 save
 ```
 
-Restore saved PM2 process list:
-
-```bash
-pm2 resurrect
-```
+Do not recreate `luna-backend-dev` as a production requirement.
 
 ## Manual Runtime Commands
 
-These commands are for manual verification or emergency recovery.
-
-### Backend Manual Start
+Manual backend command:
 
 ```bash
 cd /home/ubuntu/stock-chart-tutor/backend
@@ -191,97 +180,91 @@ source .venv/bin/activate
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### Frontend Manual Start
+Manual frontend command:
 
 ```bash
 cd /home/ubuntu/stock-chart-tutor/frontend
 npm run start
 ```
 
-For normal production operation, prefer PM2 restart commands instead of manual foreground execution.
+For normal operation, use PM2 instead of foreground manual commands.
 
 ## Health Checks
 
-### Backend Health
-
-Command:
+Backend health:
 
 ```bash
 curl http://127.0.0.1:8000/health
 ```
 
-Expected response:
+Expected:
 
 ```json
 {"ok":true}
 ```
 
-### Database Health
-
-Command:
+DB health:
 
 ```bash
 curl http://127.0.0.1:8000/health/db
 ```
 
-Expected response:
+Expected:
 
 ```json
 {"ok":true,"status":"connected"}
 ```
 
-### Nginx Through Frontend
-
-Command:
+Nginx through frontend:
 
 ```bash
 curl -I http://127.0.0.1
 ```
 
-Expected result:
-
-- HTTP response is returned
-- no connection refused
-- no 502 or 504 error
-
-### Frontend Direct
-
-Command:
+Frontend direct:
 
 ```bash
 curl -I http://127.0.0.1:3000
 ```
 
-Expected result:
-
-- HTTP response is returned
-- frontend process is reachable directly
-
-### Public Browser
-
-Open:
+Public browser:
 
 ```text
 http://168.107.9.177
 ```
 
-Expected result:
+## Nginx Configuration
 
-- PROJECTLUNA frontend loads in browser
-- analysis result page works
+Primary Nginx configuration path:
 
-## Nginx Operations
+```text
+/etc/nginx/sites-available/default
+```
+
+Enabled site path:
+
+```text
+/etc/nginx/sites-enabled/default
+```
+
+Expected upstream targets:
+
+```text
+frontend upstream: http://127.0.0.1:3000
+backend upstream: http://127.0.0.1:8000
+```
+
+Expected routing basis:
+
+- `/` routes to the frontend upstream on port 3000
+- backend API and health routes route to the backend upstream on port 8000
+- `/health` routes to `http://127.0.0.1:8000/health`
+- `/health/db` routes to `http://127.0.0.1:8000/health/db`
 
 Check Nginx status:
 
 ```bash
 sudo systemctl status nginx
-```
-
-Expected result:
-
-```text
-active (running)
 ```
 
 Validate Nginx configuration:
@@ -302,13 +285,11 @@ Restart Nginx:
 sudo systemctl restart nginx
 ```
 
-If Nginx returns 502 or 504, check whether `luna-frontend` and `luna-backend` are online and reachable on their local ports.
-
 ## Firewall Recovery
 
-During the 2026-06-18 recovery, the server was internally healthy but public access was blocked until TCP port 80 was allowed in iptables.
+During the 2026-06-18 recovery, the server was healthy internally but public access was blocked until TCP port 80 was allowed in iptables.
 
-Use the following commands to allow and persist port 80:
+Allow and persist TCP port 80:
 
 ```bash
 sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT
@@ -318,44 +299,19 @@ sudo netfilter-persistent reload
 sudo iptables -L -n -v
 ```
 
-Expected result:
+Normal criteria:
 
 - TCP port 80 is allowed
 - the rule remains after reload
 - public browser access works
 
-Also verify OCI network security rules if the public URL is still unavailable.
-
-## Environment and Secrets
-
-Environment variables and wallet files must survive VM recovery.
-
-Backend-related values may include:
-
-```text
-OPENAI_API_KEY
-KIS_APP_KEY
-KIS_APP_SECRET
-DB_USER
-DB_PASSWORD
-DB_DSN
-DB_WALLET_DIR
-DB_WALLET_PASSWORD
-```
-
-Frontend-related value may include:
-
-```text
-NEXT_PUBLIC_API_BASE
-```
-
-Database health depends on valid DB credentials and wallet configuration.
+If public access still fails, verify OCI security rules as well.
 
 ## Recovery Procedure
 
-Follow these steps in order during an outage.
+Follow the steps in order.
 
-### Step 1. Check Oracle VM Running State
+### Step 1. Oracle VM Running
 
 Check command:
 
@@ -368,13 +324,13 @@ Normal criteria:
 - Oracle VM exists
 - state is Running
 
-If failed:
+Failure action:
 
 - create a new Oracle VM
 - attach the existing PROJECT-LUNA Boot Volume
-- continue with public IP and service checks
+- assign a public IP
 
-### Step 2. Check PROJECT-LUNA Boot Volume Attachment
+### Step 2. Boot Volume PROJECT-LUNA Attached
 
 Check command:
 
@@ -386,21 +342,20 @@ Normal criteria:
 
 - PROJECT-LUNA Boot Volume exists
 - boot volume is attached to the active VM
-- production directory exists after SSH login
 
-Verification command after SSH:
+Server verification:
 
 ```bash
 ls -la /home/ubuntu/stock-chart-tutor
 ```
 
-If failed:
+Failure action:
 
-- attach the existing PROJECT-LUNA Boot Volume to the new VM
-- boot the VM from the attached volume
-- verify application directories
+- attach PROJECT-LUNA Boot Volume to the active VM
+- boot from the attached volume
+- verify the production directory
 
-### Step 3. Check Public IP
+### Step 3. Public IP Assigned
 
 Check command:
 
@@ -414,13 +369,12 @@ Normal criteria:
 168.107.9.177
 ```
 
-If failed:
+Failure action:
 
-- assign a public IP to the VM
+- assign a public IP
 - update any external references if the IP changes
-- verify browser and curl access again
 
-### Step 4. Check Autonomous DB Availability
+### Step 4. Autonomous DB Available
 
 Check command:
 
@@ -434,13 +388,13 @@ Normal criteria:
 Available
 ```
 
-If failed:
+Failure action:
 
 - start `projectluna-db`
-- wait until state becomes Available
-- restart backend if DB connection does not recover automatically
+- wait until Available
+- restart `luna-backend` if DB health still fails
 
-### Step 5. Check SSH Access
+### Step 5. SSH Access
 
 Check command:
 
@@ -452,15 +406,14 @@ Normal criteria:
 
 - SSH login succeeds as `ubuntu`
 
-If failed:
+Failure action:
 
-- verify VM running state
+- verify VM state
 - verify public IP
-- verify SSH security rule
-- verify key pair
-- verify OS user is `ubuntu`
+- verify SSH security rules
+- verify SSH key
 
-### Step 6. Check PM2 Processes
+### Step 6. PM2 Processes
 
 Check command:
 
@@ -472,29 +425,26 @@ Normal criteria:
 
 - `luna-frontend` is online
 - `luna-backend` is online
-- `luna-backend-dev` is not required and should not be restored as production
+- `luna-backend-dev` is not required
 
-If failed:
+Failure action:
 
 ```bash
 pm2 restart luna-frontend luna-backend
-pm2 save
-```
-
-If saved processes are missing:
-
-```bash
 pm2 resurrect
 ```
 
-Then check logs:
+If processes do not exist, recreate them:
 
 ```bash
-pm2 logs luna-frontend --lines 100
-pm2 logs luna-backend --lines 100
+cd /home/ubuntu/stock-chart-tutor/backend
+pm2 start "bash -lc 'source .venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000'" --name luna-backend
+cd /home/ubuntu/stock-chart-tutor/frontend
+pm2 start "npm run start" --name luna-frontend
+pm2 save
 ```
 
-### Step 7. Check Backend Health
+### Step 7. Backend Health
 
 Check command:
 
@@ -508,15 +458,14 @@ Normal criteria:
 {"ok":true}
 ```
 
-If failed:
+Failure action:
 
-- check `pm2 logs luna-backend --lines 100`
-- verify backend virtual environment
-- verify Python dependencies
-- verify import errors
-- restart backend
+```bash
+pm2 logs luna-backend --lines 100
+pm2 restart luna-backend
+```
 
-Emergency manual test:
+If needed, run manual backend test:
 
 ```bash
 cd /home/ubuntu/stock-chart-tutor/backend
@@ -524,7 +473,7 @@ source .venv/bin/activate
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### Step 8. Check Database Health
+### Step 8. DB Health
 
 Check command:
 
@@ -538,21 +487,20 @@ Normal criteria:
 {"ok":true,"status":"connected"}
 ```
 
-If failed:
+Failure action:
 
 - confirm `projectluna-db` is Available
-- verify wallet directory exists
-- verify backend DB environment variables
+- verify DB environment variables
+- verify wallet directory
 - restart `luna-backend`
-- inspect backend logs
 
-Wallet directory check:
+Wallet check:
 
 ```bash
 ls -la /home/ubuntu/stock-chart-tutor/backend/wallet
 ```
 
-### Step 9. Check Nginx Status
+### Step 9. Nginx Status
 
 Check command:
 
@@ -566,20 +514,14 @@ Normal criteria:
 active (running)
 ```
 
-If failed:
+Failure action:
 
 ```bash
 sudo nginx -t
 sudo systemctl restart nginx
 ```
 
-Then verify:
-
-```bash
-curl -I http://127.0.0.1
-```
-
-### Step 10. Check iptables Port 80
+### Step 10. iptables Port 80
 
 Check command:
 
@@ -589,9 +531,9 @@ sudo iptables -L -n -v
 
 Normal criteria:
 
-- TCP port 80 is allowed
+- TCP 80 is allowed
 
-If failed:
+Failure action:
 
 ```bash
 sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT
@@ -601,7 +543,7 @@ sudo netfilter-persistent reload
 sudo iptables -L -n -v
 ```
 
-### Step 11. Check Browser Access
+### Step 11. Browser Access
 
 Check command:
 
@@ -614,15 +556,17 @@ Normal criteria:
 - frontend loads
 - analysis result page works
 
-If failed:
+Failure action:
 
-- check `curl -I http://127.0.0.1`
-- check `curl -I http://127.0.0.1:3000`
-- check Nginx routing
-- check iptables
-- check OCI security rules
+```bash
+curl -I http://127.0.0.1
+curl -I http://127.0.0.1:3000
+curl http://127.0.0.1:8000/health
+```
 
-## 2026-06-18 Recovery History
+Then check Nginx, PM2, iptables, and OCI security rules.
+
+## Recovery History: 2026-06-18
 
 ### Date
 
@@ -630,30 +574,30 @@ If failed:
 
 ### Impact
 
-- PROJECTLUNA public URL was unavailable
-- frontend browser access failed
-- service could not be used externally
+- Public service URL was unavailable
+- Frontend browser access failed
+- PROJECTLUNA could not be used externally
 
 ### Root Cause
 
 - Oracle VM instance was not listed in OCI
-- only the existing PROJECT-LUNA Boot Volume remained
-- Oracle Autonomous Database `projectluna-db` was stopped
-- server internals became healthy after recovery, but public access was still blocked
-- TCP port 80 was blocked by iptables until explicitly allowed
+- only the PROJECT-LUNA Boot Volume remained
+- Oracle Autonomous Database `projectluna-db` was Stopped
+- server internals were healthy after VM recovery
+- public access was still blocked by iptables until TCP port 80 was allowed
 
 ### Recovery Actions
 
 1. Created a new Oracle VM
-2. Attached the existing PROJECT-LUNA Boot Volume
-3. Assigned new Public IP `168.107.9.177`
+2. Attached existing PROJECT-LUNA Boot Volume
+3. Assigned public IP `168.107.9.177`
 4. Started Oracle Autonomous Database `projectluna-db`
-5. Verified backend health
-6. Verified database health
-7. Verified Nginx status
+5. Verified backend `/health`
+6. Verified backend `/health/db`
+7. Verified Nginx
 8. Verified frontend browser access
 9. Allowed TCP port 80 through iptables
-10. Installed and used persistent iptables saving
+10. Installed iptables persistence
 11. Saved and reloaded firewall rules
 
 ### Validation Evidence
@@ -670,7 +614,7 @@ Expected:
 {"ok":true}
 ```
 
-Database health:
+DB health:
 
 ```bash
 curl http://127.0.0.1:8000/health/db
@@ -682,13 +626,13 @@ Expected:
 {"ok":true,"status":"connected"}
 ```
 
-Nginx frontend check:
+Nginx frontend:
 
 ```bash
 curl -I http://127.0.0.1
 ```
 
-Frontend direct check:
+Frontend direct:
 
 ```bash
 curl -I http://127.0.0.1:3000
@@ -702,43 +646,40 @@ http://168.107.9.177
 
 ### Remaining Risks
 
-- exact PM2 startup commands are not yet documented in this repository
-- Nginx site configuration path is not yet documented in this repository
-- public IP may change if a new VM is created again
-- monitoring and alerting are not automated yet
-- firewall persistence must be verified after reboot
+- public IP may change if VM is recreated
+- Nginx config must be checked after manual edits
+- PM2 process list must be saved after process recreation
+- firewall persistence must be checked after reboot
+- monitoring and alerting are not automated
 
 ### Prevention and Follow-up
 
-- keep this runbook updated after every infrastructure change
-- add exact PM2 start commands
-- add Nginx configuration path and expected upstreams
+- keep this runbook updated
 - add uptime monitoring
+- add HTTPS and DNS documentation
 - add backup and restore checklist
-- consider HTTPS and DNS setup
+- document any future PM2 or Nginx config change
 
 ### Related PR
 
 - #80
 
-## Failure Scenario Response Table
+## Failure Scenario Table
 
 | Case | Symptom | Check command | Possible cause | Action |
 |---|---|---|---|---|
-| Public URL unavailable | Browser cannot open `http://168.107.9.177` | `curl -I http://168.107.9.177` | VM down, Nginx down, port 80 blocked, OCI rule missing | Check VM, Nginx, iptables, OCI security rules |
-| Nginx 502 or 504 | Public URL returns gateway error | `sudo systemctl status nginx` and `pm2 list` | upstream frontend or backend is down | Restart `luna-frontend` and `luna-backend`, then reload Nginx |
-| PM2 process stopped | PM2 shows stopped or errored process | `pm2 list` | process crash, dependency error, manual stop | `pm2 restart luna-frontend luna-backend` and inspect logs |
-| Backend `/health` failure | Backend health does not return ok | `curl http://127.0.0.1:8000/health` | backend process down, import failure, venv issue | Check `pm2 logs luna-backend --lines 100`, verify venv, restart backend |
-| `/health/db` failure | DB health does not return connected | `curl http://127.0.0.1:8000/health/db` | DB stopped, wallet issue, DB env issue | Start `projectluna-db`, verify wallet and env, restart backend |
-| Oracle DB stopped | DB status is Stopped in OCI | OCI Console DB status | Autonomous DB not running | Start `projectluna-db` and wait for Available |
-| Port 80 blocked | Local services work but public URL fails | `sudo iptables -L -n -v` | iptables does not allow TCP 80 | Add TCP 80 rule and save with netfilter-persistent |
-| Frontend direct 3000 OK but public URL fail | `127.0.0.1:3000` works but public URL fails | `curl -I http://127.0.0.1:3000` and `curl -I http://127.0.0.1` | Nginx or firewall issue | Check Nginx config, restart Nginx, verify port 80 |
-| Backend dependency import failure | backend process restarts or exits | `pm2 logs luna-backend --lines 100` | missing package, wrong venv, broken import | Activate `.venv`, install dependencies, run manual uvicorn test |
-| Development backend restart loop | PM2 repeatedly restarts dev backend | `pm2 list` | `luna-backend-dev` restored or misconfigured | Delete or stop `luna-backend-dev`; do not include it as required production process |
+| Public URL unavailable | Browser cannot open service | `curl -I http://168.107.9.177` | VM down, Nginx down, port 80 blocked, OCI rule missing | Check VM, Nginx, iptables, OCI security rules |
+| Nginx 502 or 504 | Gateway error | `sudo systemctl status nginx` | frontend or backend upstream down | Restart PM2 processes and reload Nginx |
+| PM2 process stopped | PM2 shows stopped or errored | `pm2 list` | crash, missing env, manual stop | Restart or recreate `luna-frontend` and `luna-backend` |
+| Backend health fails | `/health` is not OK | `curl http://127.0.0.1:8000/health` | backend down, import error, venv issue | Check backend logs and restart backend |
+| DB health fails | `/health/db` is not connected | `curl http://127.0.0.1:8000/health/db` | DB stopped, wallet error, DB env error | Start DB, verify wallet and env, restart backend |
+| Oracle DB stopped | DB is Stopped in OCI | OCI DB status | Autonomous DB stopped | Start `projectluna-db` |
+| Port 80 blocked | local checks pass but public URL fails | `sudo iptables -L -n -v` | iptables blocks TCP 80 | Add TCP 80 rule and save persistently |
+| Frontend direct 3000 OK but public URL fails | port 3000 works but browser fails | `curl -I http://127.0.0.1:3000` | Nginx or firewall issue | Check Nginx config and port 80 |
+| Backend dependency import failure | backend exits or restarts | `pm2 logs luna-backend --lines 100` | missing package, wrong venv, broken import | Activate venv, install dependencies, run manual uvicorn test |
+| Development backend restart loop | dev backend repeatedly restarts | `pm2 list` | `luna-backend-dev` restored | Stop or delete `luna-backend-dev`; do not treat it as production |
 
 ## Post-Recovery Checklist
-
-Before declaring the service recovered, confirm every item below.
 
 - [ ] `http://168.107.9.177` is accessible
 - [ ] `curl http://127.0.0.1:8000/health` returns `{"ok":true}`
@@ -746,16 +687,6 @@ Before declaring the service recovered, confirm every item below.
 - [ ] `pm2 list` shows `luna-frontend` online
 - [ ] `pm2 list` shows `luna-backend` online
 - [ ] Nginx is active
-- [ ] iptables allows TCP port 80
+- [ ] iptables allows TCP 80
 - [ ] Oracle DB `projectluna-db` is Available
 - [ ] Analysis result page works
-
-## Future Improvements
-
-- document exact PM2 start commands
-- document Nginx site configuration path
-- add server reboot validation steps
-- add uptime monitoring
-- add alerting
-- add HTTPS and certificate renewal procedure
-- add DNS procedure if a domain is introduced
