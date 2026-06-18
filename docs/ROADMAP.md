@@ -1,6 +1,19 @@
 # PROJECTLUNA Roadmap
 
-## 1. Roadmap Principle
+## 1. Document Role
+
+This document defines PROJECTLUNA priorities and staged development direction.
+
+It answers what should be done now, next, later, and in the future. It should not duplicate the full PRD acceptance criteria, the stable philosophy, or the QA release gate.
+
+Related documents:
+
+- `PROJECT_CONTEXT.md`: current implementation state and gaps
+- `PRD.md`: V1 requirements and acceptance criteria
+- `LUNA_PHILOSOPHY.md`: stable product philosophy
+- `QA_CRITERIA.md`: release gate and test scenarios
+
+## 2. Roadmap Principle
 
 PROJECTLUNA should grow from a chart analysis MVP into an AI trading coach platform.
 
@@ -10,7 +23,21 @@ The roadmap must protect the product philosophy:
 
 A feature should be prioritized only if it helps users make better trading decisions, avoid impulsive behavior, or return daily with a clear reason.
 
-## 2. Current Stage
+The default response structure that roadmap work should support is:
+
+1. Conclusion
+2. Reason
+3. Action
+4. Re-check Condition
+
+In user-facing Korean, this maps to:
+
+1. 결론
+2. 이유
+3. 행동
+4. 다시 볼 조건
+
+## 3. Current Stage
 
 PROJECTLUNA currently has a working MVP flow:
 
@@ -29,7 +56,7 @@ The next roadmap step is not to add many new surfaces.
 
 The next step is to make the existing flow unmistakably useful as a trading coach.
 
-## 3. Roadmap Overview
+## 4. Roadmap Overview
 
 | Stage | Theme | Product Goal |
 |---|---|---|
@@ -38,13 +65,15 @@ The next step is to make the existing flow unmistakably useful as a trading coac
 | Later | Personalization | Use portfolio, watchlist, and behavior history |
 | Future | Real-Time Partner | Become an active investment companion |
 
-## 4. Now: Decision Quality
+## 5. Now: Decision Quality
 
 Timeframe: immediate
 
 Priority: highest
 
-### 4.1 Reframe Product Language
+The current priority is to make LUNA's response quality and result screen match the trading-coach product direction.
+
+### 5.1 Reframe Product Language
 
 Current issue:
 
@@ -67,26 +96,28 @@ Target language:
 - LUNA 트레이딩 코치
 - 오늘의 판단
 - 지금 할 일
-- 기다릴 조건
+- 다시 볼 조건
 - 수익 보호 기준
 - 관망자 판단
 - 보유자 대응
 
-### 4.2 Strengthen Response Structure
+### 5.2 Strengthen Response Structure
 
 Required response structure:
 
 1. conclusion
 2. reason
 3. action
+4. re-check condition
 
 Every response should answer:
 
 - what is the decision?
 - why?
 - what should the user do now?
+- what condition should the user watch next?
 
-### 4.3 Holder/Viewer Separation
+### 5.3 Holder/Viewer Separation
 
 Current backend direction is good.
 
@@ -97,8 +128,9 @@ Next product step:
 - avoid shared generic commentary
 - make holder response position-management-first
 - make viewer response entry-timing-first
+- make re-check conditions mode-specific
 
-### 4.4 Profit-Zone Upgrade
+### 5.4 Profit-Zone Upgrade
 
 Profit-zone handling is a core differentiator.
 
@@ -109,8 +141,9 @@ Required behavior:
 - tighter protection near resistance
 - avoid greedy holding language
 - avoid additional buying encouragement when extended
+- define the condition for re-checking the remaining position
 
-### 4.5 Fallback Upgrade
+### 5.5 Fallback Upgrade
 
 Fallback should be useful, not just apologetic.
 
@@ -122,7 +155,19 @@ Fallback should include:
 - re-check trigger
 - what not to do
 
-### 4.6 QA Criteria
+### 5.6 Safety and Trust Guardrails
+
+Decision Quality work must avoid turning LUNA into a signal service.
+
+Required direction:
+
+- no guaranteed profit claims
+- no unconditional buy/sell commands
+- no investment-advice-style certainty
+- no fear-driven wording
+- uncertainty should produce conditions and re-check standards
+
+### 5.7 QA Criteria
 
 Build a repeatable response QA set.
 
@@ -140,13 +185,15 @@ Core QA scenarios:
 - Korean stock input
 - US ticker input
 
-## 5. Next: Daily Use
+## 6. Next: Daily Use
 
 Timeframe: after Decision Quality is stable
 
 Priority: high
 
-### 5.1 Watchlist Foundation
+Daily-use features should help users return with a clear decision or re-check reason, not with generic market curiosity.
+
+### 6.1 Watchlist Foundation
 
 Goal:
 
@@ -166,7 +213,7 @@ Not needed yet:
 - brokerage integration
 - social sharing
 
-### 5.2 Daily LUNA Briefing
+### 6.2 Daily LUNA Briefing
 
 Goal:
 
@@ -179,6 +226,7 @@ Minimum briefing structure:
 - stocks near decision zones
 - profit-zone positions needing protection
 - unclear setups to ignore
+- re-check conditions carried over from the last analysis
 
 The briefing should not become market news commentary.
 
@@ -186,11 +234,11 @@ It should answer:
 
 > what should the user pay attention to today?
 
-### 5.3 Result History
+### 6.3 Result History
 
 Goal:
 
-- let users see how LUNA’s judgment changed over time
+- let users see how LUNA's judgment changed over time
 
 Minimum scope:
 
@@ -205,13 +253,13 @@ Useful for:
 - reducing impulsive repeated checking
 - helping users learn timing
 
-## 6. Later: Personalization
+## 7. Later: Personalization
 
 Timeframe: after Daily Use foundation
 
 Priority: medium
 
-### 6.1 Portfolio-Based Analysis
+### 7.1 Portfolio-Based Analysis
 
 Goal:
 
@@ -233,8 +281,9 @@ Coaching outputs:
 - avoid overexposure
 - identify emotional holding
 - position-level action plan
+- position-specific re-check condition
 
-### 6.2 Investment Habit Analysis
+### 7.2 Investment Habit Analysis
 
 Goal:
 
@@ -247,10 +296,11 @@ Possible habit patterns:
 - selling winners too early
 - holding losers too long
 - ignoring pre-defined invalidation conditions
+- repeatedly checking without a clear condition
 
 This should be coaching-oriented, not judgmental.
 
-### 6.3 Combined News + Chart Analysis
+### 7.3 Combined News + Chart Analysis
 
 Goal:
 
@@ -261,14 +311,15 @@ Constraint:
 - news must not dominate the product
 - chart + position + psychology remains the core
 - news should explain why risk or timing changed
+- news should update a decision or re-check condition, not create noise
 
-## 7. Future: Real-Time Investment Partner
+## 8. Future: Real-Time Investment Partner
 
 Timeframe: long-term
 
 Priority: future
 
-### 7.1 Chat-Based Investment Coach
+### 8.1 Chat-Based Investment Coach
 
 Goal:
 
@@ -276,16 +327,16 @@ Goal:
 
 Examples:
 
-- “If I already have 30% profit, should I reduce?”
-- “What would make this setup invalid?”
-- “Am I chasing here?”
-- “What should I wait for tomorrow?”
+- If I already have 30% profit, should I reduce?
+- What would make this setup invalid?
+- Am I chasing here?
+- What should I wait for tomorrow?
 
 Chat must preserve the product philosophy.
 
 It should not become long market commentary.
 
-### 7.2 AI Character Interface
+### 8.2 AI Character Interface
 
 Goal:
 
@@ -297,7 +348,7 @@ Constraint:
 - character should not become the main product
 - cuteness must not reduce trust or actionability
 
-### 7.3 Real-Time Partner
+### 8.3 Real-Time Partner
 
 Goal:
 
@@ -312,7 +363,7 @@ Potential features:
 
 This should be built only after decision quality is reliable.
 
-## 8. Explicitly Deprioritized
+## 9. Explicitly Deprioritized
 
 The following should not be prioritized now:
 
@@ -326,7 +377,7 @@ The following should not be prioritized now:
 - news-heavy dashboard
 - character animation before coaching clarity
 
-## 9. Roadmap Decision Rules
+## 10. Roadmap Decision Rules
 
 Use these questions before prioritizing any feature:
 
@@ -334,29 +385,31 @@ Use these questions before prioritizing any feature:
 2. Does this reduce impulsive behavior?
 3. Does this improve timing?
 4. Does this separate holder and viewer needs?
-5. Does this strengthen daily use?
-6. Does this differentiate LUNA from chart tools?
-7. Is this necessary now?
+5. Does this create or preserve a useful re-check condition?
+6. Does this strengthen daily use?
+7. Does this differentiate LUNA from chart tools?
+8. Is this necessary now?
 
 If the answer is no, defer the feature.
 
-## 10. Current Recommended Order
+## 11. Current Recommended Order
 
 1. Rename and reposition visible UI language.
 2. Move LUNA decision above technical summary.
-3. Enforce conclusion → reason → action.
+3. Enforce conclusion -> reason -> action -> re-check condition.
 4. Strengthen holder/viewer UI separation.
 5. Improve profit-zone response quality.
 6. Improve fallback response quality.
-7. Build QA scenarios.
-8. Add minimal watchlist.
-9. Add daily briefing.
-10. Add history.
-11. Add portfolio-based coaching.
-12. Add habit analysis.
-13. Add news context.
-14. Add chat coach.
-15. Add real-time partner features.
+7. Add safety and trust guardrails to response QA.
+8. Build QA scenarios.
+9. Add minimal watchlist.
+10. Add daily briefing.
+11. Add history.
+12. Add portfolio-based coaching.
+13. Add habit analysis.
+14. Add news context.
+15. Add chat coach.
+16. Add real-time partner features.
 
 ## Last Updated
 
@@ -364,7 +417,7 @@ If the answer is no, defer the feature.
 
 ## Version
 
-v0.1
+v0.2
 
 ## Owner
 
