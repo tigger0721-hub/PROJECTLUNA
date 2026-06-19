@@ -356,10 +356,25 @@ function detectRiskLevel(result) {
   return "medium";
 }
 
+function firstSentenceOrPreview(value) {
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  if (!text) return "";
+
+  const firstLine = text.split("\n").find((line) => line.trim()) || text;
+  const sentenceMatch = firstLine.match(/^.+?[.!?。！？](\s|$)/);
+  const preview = (sentenceMatch?.[0] || firstLine).trim();
+
+  return preview.length > 120 ? `${preview.slice(0, 120).trim()}...` : preview;
+}
+
 function buildDecisionCardData(result, searchParams) {
   const userMode = detectUserMode(result, searchParams);
   const fallback = userMode === "holder" ? holderFallback : viewerFallback;
   const decision = result?.decision || result?.lunaDecision || result?.analysis?.decision || {};
+  const aiOpinion = result?.aiOpinion || {};
+  const aiSummary = typeof aiOpinion?.summary === "string" ? aiOpinion.summary.trim() : "";
+  const aiReasonSummary = firstSentenceOrPreview(aiOpinion?.commentary);
 
   const actions = [
     ...toArray(decision.actions),
@@ -377,8 +392,8 @@ function buildDecisionCardData(result, searchParams) {
   return {
     userMode,
     zone: detectZone(result),
-    headline: decision.headline || decision.conclusion || fallback.headline,
-    reasonSummary: decision.reasonSummary || decision.reason || fallback.reasonSummary,
+    headline: decision.headline || decision.conclusion || aiSummary || fallback.headline,
+    reasonSummary: decision.reasonSummary || decision.reason || aiReasonSummary || fallback.reasonSummary,
     actions: actions.length > 0 ? actions : fallback.actions,
     recheckConditions: recheckConditions.length > 0 ? recheckConditions : fallback.recheckConditions,
     riskLevel: detectRiskLevel(result)
