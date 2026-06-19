@@ -37,7 +37,7 @@ const bodyStyle = {
 };
 
 function modeLabel(userMode) {
-  return userMode === "holder" ? "Holder" : "Viewer";
+  return userMode === "holder" ? "보유자" : "미보유자";
 }
 
 function modeColor(userMode, zone, riskLevel) {
@@ -100,7 +100,7 @@ export default function DecisionCard({
   const accent = modeColor(userMode, zone, riskLevel);
 
   return (
-    <section style={cardStyle} aria-label="LUNA 판단 카드">
+    <section style={cardStyle} aria-label="LUNA decision card">
       <div
         style={{
           display: "flex",
