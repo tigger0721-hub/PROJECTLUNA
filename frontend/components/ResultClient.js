@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import CandleChart from "@/components/CandleChart";
+import DecisionCard from "@/components/DecisionCard";
 import { formatNumber, formatPrice, formatPriceText } from "@/utils/formatPrice";
 
 const pageStyle = {
   minHeight: "100vh",
-  background: "#f8fafc",
-  color: "#0f172a",
+  background: "#0B0F14",
+  color: "#F3F6FA",
   padding: "16px 12px 96px"
 };
 
@@ -18,11 +19,12 @@ const wrapperStyle = {
 };
 
 const cardStyle = {
-  background: "#ffffff",
-  border: "1px solid #e2e8f0",
+  background: "#121821",
+  border: "1px solid #263241",
   borderRadius: 24,
   padding: 18,
-  boxShadow: "0 10px 24px rgba(15,23,42,0.08)"
+  boxShadow: "0 10px 24px rgba(0,0,0,0.22)",
+  color: "#F3F6FA"
 };
 
 const chipStyle = {
@@ -30,16 +32,32 @@ const chipStyle = {
   alignItems: "center",
   gap: 6,
   borderRadius: 999,
-  background: "#eff6ff",
-  color: "#1e293b",
+  background: "#171F2A",
+  border: "1px solid #263241",
+  color: "#F3F6FA",
   fontSize: 13,
   padding: "8px 12px"
 };
 
 const summaryCardStyle = {
-  background: "#0f172a",
+  background: "#171F2A",
   borderRadius: 18,
+  border: "1px solid #263241",
   padding: 14
+};
+
+const viewerFallback = {
+  headline: "지금은 확인이 먼저입니다.",
+  reasonSummary: "현재 데이터만으로는 진입 타이밍을 단정하기 어렵습니다.",
+  actions: ["신규 진입은 보류하고 지지/저항 반응을 확인하세요.", "추격하지 말고 다음 확인 구간을 기다리세요."],
+  recheckConditions: ["지지선 반등", "저항 돌파 후 안착", "거래량 회복"]
+};
+
+const holderFallback = {
+  headline: "보유 기준을 다시 확인하세요.",
+  reasonSummary: "현재 데이터만으로는 추가 매수보다 리스크 관리가 우선입니다.",
+  actions: ["손절/보호 기준을 확인하고 무리한 추가 매수는 피하세요.", "추가매수는 조건 충족 전 보류하세요."],
+  recheckConditions: ["평단 대비 손익 변화", "지지선 이탈", "저항 돌파 후 안착"]
 };
 
 function LoadingView() {
@@ -179,7 +197,7 @@ function LoadingView() {
           <p
             style={{
               marginTop: 14,
-              color: "#475569",
+              color: "#A7B0BD",
               fontSize: 17,
               lineHeight: 1.7,
               minHeight: 58
@@ -193,7 +211,7 @@ function LoadingView() {
               marginTop: 20,
               width: "100%",
               height: 8,
-              background: "#1e293b",
+              background: "#263241",
               borderRadius: 9999,
               overflow: "hidden",
               position: "relative"
@@ -202,7 +220,7 @@ function LoadingView() {
             <div className="loading-bar" />
           </div>
 
-          <div style={{ marginTop: 16, color: "#64748b", fontSize: 14 }}>
+          <div style={{ marginTop: 16, color: "#A7B0BD", fontSize: 14 }}>
             오빠, 잠깐만 기다려줘. 루나가 보기 편하게 정리하고 있어.
           </div>
         </div>
@@ -215,7 +233,7 @@ function LoadingView() {
           left: 0;
           width: 35%;
           height: 100%;
-          background: linear-gradient(90deg, #60a5fa, #3b82f6);
+          background: linear-gradient(90deg, #4DA3FF, #3DDC97);
           border-radius: 9999px;
           animation: loadingBar 1.5s infinite ease-in-out;
         }
@@ -251,11 +269,11 @@ function BottomSheet({ open, onClose, children }) {
           right: 0,
           bottom: 0,
           zIndex: 50,
-          background: "#ffffff",
+          background: "#121821",
           borderTopLeftRadius: 24,
           borderTopRightRadius: 24,
-          border: "1px solid #e2e8f0",
-          boxShadow: "0 -10px 30px rgba(15,23,42,0.12)",
+          border: "1px solid #263241",
+          boxShadow: "0 -10px 30px rgba(0,0,0,0.35)",
           padding: "16px 16px 28px",
           maxHeight: "78vh",
           overflowY: "auto"
@@ -266,7 +284,7 @@ function BottomSheet({ open, onClose, children }) {
             width: 56,
             height: 6,
             borderRadius: 999,
-            background: "#334155",
+            background: "#263241",
             margin: "0 auto 16px"
           }}
         />
@@ -284,11 +302,11 @@ function SummaryRow({ label, value }) {
         justifyContent: "space-between",
         gap: 12,
         padding: "10px 0",
-        borderBottom: "1px solid rgba(71,85,105,0.4)"
+        borderBottom: "1px solid rgba(167,176,189,0.2)"
       }}
     >
-      <div style={{ color: "#94a3b8", fontSize: 14 }}>{label}</div>
-      <div style={{ color: "#f8fafc", fontWeight: 700, textAlign: "right" }}>{value}</div>
+      <div style={{ color: "#A7B0BD", fontSize: 14 }}>{label}</div>
+      <div style={{ color: "#F3F6FA", fontWeight: 700, textAlign: "right" }}>{value}</div>
     </div>
   );
 }
@@ -309,6 +327,62 @@ function movingAverageText(summary, country) {
   const ma60 = formatPriceOrDash(summary?.ma60, country);
   const ma120 = formatPriceOrDash(summary?.ma120, country);
   return `5일 ${ma5} / 20일 ${ma20} / 60일 ${ma60} / 120일 ${ma120}`;
+}
+
+function toArray(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).map(String);
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return [];
+}
+
+function detectUserMode(result, searchParams) {
+  const rawMode = `${searchParams.get("mode") || result?.userMode || result?.mode || result?.personalization?.holderView || ""}`.toLowerCase();
+  if (rawMode.includes("holder") || rawMode.includes("보유")) return "holder";
+  return "viewer";
+}
+
+function detectZone(result) {
+  const rawZone = `${result?.zone || result?.profitZone || result?.analysis?.zone || result?.analysis?.summary?.zone || ""}`.toLowerCase();
+  if (rawZone.includes("profit") || rawZone.includes("수익")) return "profit";
+  if (rawZone.includes("loss") || rawZone.includes("손실")) return "loss";
+  if (rawZone.includes("neutral") || rawZone.includes("중립")) return "neutral";
+  return "none";
+}
+
+function detectRiskLevel(result) {
+  const rawRisk = `${result?.riskLevel || result?.analysis?.riskLevel || result?.analysis?.summary?.riskLevel || ""}`.toLowerCase();
+  if (rawRisk.includes("high") || rawRisk.includes("높")) return "high";
+  if (rawRisk.includes("low") || rawRisk.includes("낮")) return "low";
+  return "medium";
+}
+
+function buildDecisionCardData(result, searchParams) {
+  const userMode = detectUserMode(result, searchParams);
+  const fallback = userMode === "holder" ? holderFallback : viewerFallback;
+  const decision = result?.decision || result?.lunaDecision || result?.analysis?.decision || {};
+
+  const actions = [
+    ...toArray(decision.actions),
+    ...toArray(decision.actionList),
+    ...toArray(result?.actions)
+  ];
+
+  const recheckConditions = [
+    ...toArray(decision.recheckConditions),
+    ...toArray(decision.recheckConditionList),
+    ...toArray(decision.recheck),
+    ...toArray(result?.recheckConditions)
+  ];
+
+  return {
+    userMode,
+    zone: detectZone(result),
+    headline: decision.headline || decision.conclusion || fallback.headline,
+    reasonSummary: decision.reasonSummary || decision.reason || fallback.reasonSummary,
+    actions: actions.length > 0 ? actions : fallback.actions,
+    recheckConditions: recheckConditions.length > 0 ? recheckConditions : fallback.recheckConditions,
+    riskLevel: detectRiskLevel(result)
+  };
 }
 
 export default function ResultClient() {
@@ -384,8 +458,8 @@ export default function ResultClient() {
           <div
             style={{
               ...cardStyle,
-              border: "1px solid #7f1d1d",
-              background: "#450a0a",
+              border: "1px solid #FF5C5C",
+              background: "#2A1217",
               color: "#ffffff",
               marginBottom: 20
             }}
@@ -397,8 +471,8 @@ export default function ResultClient() {
             style={{
               borderRadius: 14,
               border: "none",
-              background: "#2563eb",
-              color: "#fff",
+              background: "#4DA3FF",
+              color: "#0B0F14",
               padding: "12px 18px",
               fontWeight: 700
             }}
@@ -421,6 +495,7 @@ export default function ResultClient() {
   const aiOpinion = result?.aiOpinion || {};
   const aiSummary = formatPriceText(aiOpinion?.summary || "지금은 루나 한 줄 요약을 잠깐 못 불러왔어.", country);
   const aiCommentary = formatPriceText(aiOpinion?.commentary || "오빠, 지금은 해설을 잠깐 못 불러왔어. 다시 눌러보자.", country);
+  const decisionCardData = buildDecisionCardData(result, searchParams);
 
   return (
     <main style={pageStyle}>
@@ -438,9 +513,9 @@ export default function ResultClient() {
             onClick={() => router.push("/")}
             style={{
               borderRadius: 14,
-              border: "1px solid #334155",
-              background: "#ffffff",
-              color: "#0f172a",
+              border: "1px solid #263241",
+              background: "#121821",
+              color: "#F3F6FA",
               padding: "10px 14px",
               fontWeight: 700
             }}
@@ -455,10 +530,12 @@ export default function ResultClient() {
           </div>
         </div>
 
+        <DecisionCard {...decisionCardData} />
+
         <div style={{ ...cardStyle, padding: 16 }}>
           <div style={{ marginBottom: 12 }}>
             <div style={{ fontSize: 28, fontWeight: 800 }}>{currentPrice}</div>
-            <div style={{ color: "#94a3b8", marginTop: 6 }}>
+            <div style={{ color: "#A7B0BD", marginTop: 6 }}>
               {result?.stateHint || summary?.state || "상태 확인중"}
             </div>
           </div>
@@ -479,7 +556,7 @@ export default function ResultClient() {
             }}
           >
             <div style={summaryCardStyle}>
-              <div style={{ color: "#64748b", fontSize: 13, marginBottom: 8 }}>기술 요약</div>
+              <div style={{ color: "#A7B0BD", fontSize: 13, marginBottom: 8, fontWeight: 700 }}>기술 요약</div>
               <SummaryRow label="현재가" value={currentPrice} />
               <SummaryRow label="이평선" value={movingAverageText(summary, country)} />
               <SummaryRow label="지지" value={support} />
@@ -499,12 +576,12 @@ export default function ResultClient() {
           bottom: 16,
           borderRadius: 18,
           border: "none",
-          background: "#2563eb",
-          color: "#fff",
+          background: "#4DA3FF",
+          color: "#0B0F14",
           padding: "16px 18px",
           fontSize: 17,
           fontWeight: 800,
-          boxShadow: "0 12px 24px rgba(37,99,235,0.35)",
+          boxShadow: "0 12px 24px rgba(77,163,255,0.35)",
           zIndex: 30
         }}
       >
@@ -513,13 +590,13 @@ export default function ResultClient() {
 
       <BottomSheet open={sheetOpen} onClose={() => setSheetOpen(false)}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <div style={{ fontSize: 20, fontWeight: 800 }}>루나 해설</div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: "#F3F6FA" }}>루나 해설</div>
           <button
             onClick={() => setSheetOpen(false)}
             style={{
-              border: "1px solid #334155",
-              background: "#ffffff",
-              color: "#0f172a",
+              border: "1px solid #263241",
+              background: "#171F2A",
+              color: "#F3F6FA",
               borderRadius: 12,
               padding: "8px 12px",
               fontWeight: 700
@@ -533,7 +610,7 @@ export default function ResultClient() {
           style={{
             whiteSpace: "pre-wrap",
             lineHeight: 1.9,
-            color: "#0f172a",
+            color: "#F3F6FA",
             fontSize: 16
           }}
         >
